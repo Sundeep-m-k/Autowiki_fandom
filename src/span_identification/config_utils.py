@@ -75,6 +75,6 @@ def get_research_csv_path(config: dict) -> Path:
 
 
 def get_span_id_log_dir(config: dict, domain: str) -> Path:
-    """Get log directory for span_id: <domain>/span_id/"""
+    """Get log directory for span_id: data/logs/<domain>/span_id/"""
     data_dir = Path(config.get("data_dir", "data"))
-    return data_dir / domain / "span_id"
+    return data_dir / "logs" / domain / "span_id"

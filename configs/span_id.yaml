@@ -28,7 +28,7 @@ split:
   recreate_if_exists: false
 
 # Sweep dimensions
-domains: ["money-heist"]
+domains: ["beverlyhillscop"]
 granularities: ["sentence", "paragraph", "article"]
 models: ["bert-base-uncased"]
 label_schemes: ["BIO", "BILOU"]

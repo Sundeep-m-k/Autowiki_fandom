@@ -20,11 +20,12 @@ for p in (_PROJECT_ROOT, _SRC):
     if s not in sys.path:
         sys.path.insert(0, s)
 
-from src.data_scraping.scrape_pipeline import run_full_scrape
+from src.data_scraping.scrape_pipeline import load_scraping_config, run_full_scrape
 from src.utils.logging_utils import create_logger, get_log_dir
 
 def main() -> None:
-    log_dir = get_log_dir("scraping")
+    config = load_scraping_config(_PROJECT_ROOT / "configs" / "scraping.yaml")
+    log_dir = get_log_dir("scraping", domain=config.domain)
     logger, log_path = create_logger(log_dir=log_dir, script_name="00_scrape_fandom")
 
     start = time.time()

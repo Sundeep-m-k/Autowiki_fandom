@@ -13,7 +13,7 @@ def setup_span_id_logger(
     script_name: str = "span_id",
     level: int = logging.INFO,
 ) -> logging.Logger:
-    """Setup logger with file and console handlers. log_dir should be domain/span_id (e.g. data/beverlyhillscop/span_id)."""
+    """Setup logger with file and console handlers. log_dir: data/logs/<domain>/span_id/"""
     logger = logging.getLogger("span_id")
     # Remove existing file handlers when switching log dir (e.g. new domain)
     for h in list(logger.handlers):
