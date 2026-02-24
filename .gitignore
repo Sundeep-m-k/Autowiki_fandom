@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual env
+.venv/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Large data (excluded from git - use DVC or separate storage)
+data/raw/
+data/span_id/*/checkpoints/
+data/span_id/*/token_data/
+data/logs/
+
+# Legacy/duplicate
+autowiki/

@@ -1,0 +1,38 @@
+{
+  "domain": "beverlyhillscop",
+  "created_at": "2026-02-24T03:46:37.089810",
+  "files": [
+    {
+      "path": "paragraphs_beverlyhillscop.jsonl",
+      "size_bytes": 860597
+    },
+    {
+      "path": "sentences_beverlyhillscop.jsonl",
+      "size_bytes": 1605744
+    },
+    {
+      "path": "articles_page_granularity_beverlyhillscop.jsonl",
+      "size_bytes": 1062900
+    },
+    {
+      "path": "articles_beverlyhillscop.jsonl",
+      "size_bytes": 18990
+    },
+    {
+      "path": "paragraphs_beverlyhillscop.csv",
+      "size_bytes": 375639
+    },
+    {
+      "path": "paragraph_links_beverlyhillscop.csv",
+      "size_bytes": 44764
+    },
+    {
+      "path": "sentences_beverlyhillscop.csv",
+      "size_bytes": 462943
+    },
+    {
+      "path": "sentence_links_beverlyhillscop.csv",
+      "size_bytes": 44099
+    }
+  ]
+}

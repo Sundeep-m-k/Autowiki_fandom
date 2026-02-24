@@ -1,0 +1,54 @@
+{
+  "domain": "beverlyhillscop",
+  "updated_at": "2026-02-23T03:45:38.019470",
+  "scraping": {
+    "total_urls": 139,
+    "downloaded": 0,
+    "skipped": 139,
+    "failed": 0,
+    "html_bytes": {
+      "total": 0,
+      "avg": 0,
+      "max": 0
+    },
+    "text_bytes": {
+      "total": 0,
+      "avg": 0,
+      "max": 0
+    }
+  },
+  "previous_runs": [
+    {
+      "updated_at": "2026-02-23T03:44:39.596966",
+      "scraping": {
+        "total_urls": 139,
+        "downloaded": 129,
+        "skipped": 10,
+        "failed": 0,
+        "html_bytes": {
+          "total": 26649202,
+          "avg": 206582.96124031008,
+          "max": 318823
+        },
+        "text_bytes": {
+          "total": 375077,
+          "avg": 2907.5736434108526,
+          "max": 42415
+        }
+      }
+    }
+  ],
+  "dataset_stats": {
+    "num_articles": 129,
+    "num_paragraphs": 1274,
+    "num_sentences": 3441,
+    "num_links": 2448,
+    "link_type_counts": {
+      "internal": 961,
+      "external": 32,
+      "category": 0,
+      "file": 0,
+      "other": 231
+    }
+  }
+}

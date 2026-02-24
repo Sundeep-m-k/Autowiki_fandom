@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autowiki"
+version = "0.1.0"
+description = "Span identification on Fandom wiki articles"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]

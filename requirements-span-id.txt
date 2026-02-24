@@ -1,0 +1,4 @@
+# Span identification dependencies (in addition to base requirements)
+torch>=2.0
+transformers>=4.30
+pyyaml>=6.0
