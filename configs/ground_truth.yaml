@@ -1,5 +1,5 @@
 # Ground truth build config
-domain: "beverlyhillscop"
+domain: "money-heist"
 raw_dir: "data/raw"
 processed_dir: "data/processed"
 
