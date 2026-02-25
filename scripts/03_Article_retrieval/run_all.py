@@ -8,7 +8,7 @@ Usage:
   python scripts/03_Article_retrieval/run_all.py
 
   # Machine-specific config:
-  python scripts/03_Article_retrieval/run_all.py --config configs/article_retrieval_kudremukh.yaml
+  python scripts/03_Article_retrieval/run_all.py --config configs/article_retrieval/kudremukh.yaml
 
   # Single domain:
   python scripts/03_Article_retrieval/run_all.py --domain money-heist
@@ -45,11 +45,11 @@ PYTHON = sys.executable
 
 # Auto-select config based on hostname; can always be overridden with --config.
 _HOSTNAME_CONFIG: dict[str, str] = {
-    "kudremukh": "configs/article_retrieval_kudremukh.yaml",
+    "kudremukh": "configs/article_retrieval/kudremukh.yaml",
 }
 _DEFAULT_CONFIG = _HOSTNAME_CONFIG.get(
     socket.gethostname().lower(),
-    "configs/article_retrieval_base.yaml",
+    "configs/article_retrieval/base.yaml",
 )
 
 

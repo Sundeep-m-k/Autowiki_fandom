@@ -3,7 +3,7 @@
 01_build_ground_truth.py
 
 Build ground truth from scraped HTML:
-- Reads configs/ground_truth.yaml
+- Reads configs/data_processing/ground_truth.yaml
 - Parses HTML in data/raw/<domain>/
 - Outputs paragraphs, sentences, articles (JSONL/CSV) to data/processed/<domain>/
 """
@@ -26,7 +26,7 @@ from src.utils.stats_utils import update_dataset_stats
 
 
 def main() -> None:
-    config_path = _PROJECT_ROOT / "configs" / "ground_truth.yaml"
+    config_path = _PROJECT_ROOT / "configs" / "data_processing" / "ground_truth.yaml"
     domain = None
     if len(sys.argv) >= 2:
         domain = sys.argv[1].strip()

@@ -94,12 +94,17 @@ def assign_labels(
     tokenizer,
     max_seq_length: int,
     label_scheme: LabelScheme = "BILOU",
-) -> tuple[list[int], list[int], list[int]]:
+) -> tuple[list[int], list[int], list[int], list[list[int]]]:
     """
     Assign token-level labels for a given label scheme.
 
-    Returns (input_ids, attention_mask, label_ids) all aligned with the full
-    tokenized sequence (CLS, real tokens, SEP).  Special tokens get label O.
+    Returns (input_ids, attention_mask, label_ids, char_offsets) all aligned
+    with the full tokenized sequence (CLS, real tokens, SEP).
+    Special tokens get label O and char_offset [0, 0].
+
+    char_offsets is a list of [char_start, char_end] per non-padding token,
+    stored alongside the tokenised example so that predicted token spans can
+    be decoded back to character-level spans for error analysis.
     """
     label2id = get_scheme_label2id(label_scheme)
     o_id = label2id["O"]
@@ -116,6 +121,8 @@ def assign_labels(
     attention_mask = encoding["attention_mask"]
 
     labels = [o_id] * len(input_ids)
+    # Store char offsets as plain lists for JSON serialisation
+    char_offsets = [list(o) for o in offsets]
 
     for sp in spans:
         start_char = int(sp["start"])
@@ -153,7 +160,7 @@ def assign_labels(
         else:
             raise ValueError(f"Unsupported label_scheme in preprocess: {label_scheme!r}")
 
-    return input_ids, attention_mask, labels
+    return input_ids, attention_mask, labels, char_offsets
 
 
 # Keep the old name as an alias so existing call-sites still work.
@@ -163,8 +170,11 @@ def assign_bilou_labels(
     tokenizer,
     max_seq_length: int,
 ) -> tuple[list[int], list[int], list[int]]:
-    """Backward-compatible wrapper: always uses BILOU scheme."""
-    return assign_labels(text, spans, tokenizer, max_seq_length, label_scheme="BILOU")
+    """Backward-compatible wrapper: always uses BILOU scheme. Drops char_offsets."""
+    input_ids, attention_mask, label_ids, _offsets = assign_labels(
+        text, spans, tokenizer, max_seq_length, label_scheme="BILOU"
+    )
+    return input_ids, attention_mask, label_ids
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +202,7 @@ def _unit_to_token_example(
     use_char = granularity == "article"
     spans = _spans_from_links_internal_only(links, use_char_offsets=use_char)
 
-    input_ids, attention_mask, label_ids = assign_labels(
+    input_ids, attention_mask, label_ids, char_offsets = assign_labels(
         text=text,
         spans=spans,
         tokenizer=tokenizer,
@@ -206,6 +216,7 @@ def _unit_to_token_example(
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "label_ids": label_ids,
+        "char_offsets": char_offsets,
     }
 
 

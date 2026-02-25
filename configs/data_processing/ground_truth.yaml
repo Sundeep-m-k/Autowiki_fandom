@@ -1,0 +1,22 @@
+# Ground truth build config
+domain: "money-heist"
+raw_dir: "data/raw"
+processed_dir: "data/processed"
+
+outputs:
+  paragraphs_jsonl: true
+  paragraphs_by_article: false
+  sentences_jsonl: true
+  sentences_by_article: false
+  articles_page_granularity_jsonl: true
+  articles_index_jsonl: true
+  paragraphs_csv: true
+  paragraph_links_csv: true
+  sentences_csv: true
+  sentence_links_csv: true
+
+paragraph:
+  max_chars: 512
+  max_sentences: 4
+  min_chars: 30
+  hard_max_chars: 1024

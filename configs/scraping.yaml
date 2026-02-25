@@ -1,4 +1,0 @@
-base_url: "https://beverlyhillscop.fandom.com/"
-start_url: "https://beverlyhillscop.fandom.com/wiki/Special:AllPages"
-delay_seconds: 2.5
-use_api_fallback: true

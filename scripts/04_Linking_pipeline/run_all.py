@@ -53,7 +53,7 @@ def run_step(script: str, extra_args: list[str], step_name: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run full linking pipeline.")
-    parser.add_argument("--config",  default="configs/linking.yaml")
+    parser.add_argument("--config",  default="configs/linking/linking.yaml")
     parser.add_argument("--domain",  help="Single domain override.")
     parser.add_argument("--force",   action="store_true")
     parser.add_argument("--skip-html", action="store_true", help="Skip HTML rendering.")

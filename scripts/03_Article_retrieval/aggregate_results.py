@@ -59,7 +59,7 @@ def print_table(rows: list[dict], title: str, top: int = 30) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate article retrieval results.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default="configs/article_retrieval/article_retrieval.yaml")
     parser.add_argument("--domain", help="Filter by domain.")
     parser.add_argument(
         "--stage",

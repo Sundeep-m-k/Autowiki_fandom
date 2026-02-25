@@ -10,7 +10,7 @@ All artifacts are named to encode the active experiment dimensions via config_ut
 
 Run:
   python scripts/03_Article_retrieval/00_build_article_index.py
-  python scripts/03_Article_retrieval/00_build_article_index.py --config configs/article_retrieval_kudremukh.yaml
+  python scripts/03_Article_retrieval/00_build_article_index.py --config configs/article_retrieval/kudremukh.yaml
   python scripts/03_Article_retrieval/00_build_article_index.py --domain money-heist --force
 """
 from __future__ import annotations
@@ -117,7 +117,7 @@ def build_for_domain(config: dict, domain: str, force: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build article indexes for retrieval.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default="configs/article_retrieval/article_retrieval.yaml")
     parser.add_argument("--domain", help="Override domain list (single domain).")
     parser.add_argument("--force", action="store_true", help="Rebuild all indexes even if cached.")
     args = parser.parse_args()

@@ -1,6 +1,0 @@
-# Article Retrieval — general / multi-domain config.
-# Inherits all defaults from article_retrieval_base.yaml.
-# Override only what differs for this machine/experiment.
-base: "article_retrieval_base.yaml"
-
-domains: ["beverlyhillscop"]

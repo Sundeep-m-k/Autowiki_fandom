@@ -55,7 +55,7 @@ def build_for_domain(config: dict, domain: str, force: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build query dataset for retrieval.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default="configs/article_retrieval/article_retrieval.yaml")
     parser.add_argument("--domain", help="Override domain list (single domain).")
     parser.add_argument("--force", action="store_true", help="Rebuild even if cached.")
     args = parser.parse_args()

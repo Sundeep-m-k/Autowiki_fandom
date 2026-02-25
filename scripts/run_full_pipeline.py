@@ -37,9 +37,9 @@ Usage examples
 
   # Machine-specific configs:
   python scripts/run_full_pipeline.py \\
-      --span-id-config   configs/span_id_kudremukh.yaml \\
-      --retrieval-config configs/article_retrieval_kudremukh.yaml \\
-      --linking-config   configs/linking.yaml
+      --span-id-config   configs/span_id/kudremukh.yaml \\
+      --retrieval-config configs/article_retrieval/kudremukh.yaml \\
+      --linking-config   configs/linking/linking.yaml
 
   # NIL threshold ablation in the linking stage:
   python scripts/run_full_pipeline.py --skip-scrape --skip-gt --skip-span-id \\
@@ -47,11 +47,11 @@ Usage examples
 
 Configs
 -------
-  Scraping:          configs/scraping.yaml
-  Ground truth:      configs/ground_truth.yaml
-  Span ID:           configs/span_id.yaml          (override: --span-id-config)
-  Article retrieval: configs/article_retrieval.yaml (override: --retrieval-config)
-  Linking:           configs/linking.yaml           (override: --linking-config)
+  Scraping:          configs/data_processing/scraping.yaml
+  Ground truth:      configs/data_processing/ground_truth.yaml
+  Span ID:           configs/span_id/span_id.yaml          (override: --span-id-config)
+  Article retrieval: configs/article_retrieval/article_retrieval.yaml (override: --retrieval-config)
+  Linking:           configs/linking/linking.yaml           (override: --linking-config)
 """
 from __future__ import annotations
 
@@ -129,11 +129,11 @@ def main() -> None:
                              "Each config's default domain is used otherwise.")
 
     # ── Configs ───────────────────────────────────────────────────────────────
-    parser.add_argument("--span-id-config",   default="configs/span_id.yaml",
-                        help="Span ID config (default: configs/span_id.yaml)")
-    parser.add_argument("--retrieval-config", default="configs/article_retrieval.yaml",
+    parser.add_argument("--span-id-config",   default="configs/span_id/span_id.yaml",
+                        help="Span ID config (default: configs/span_id/span_id.yaml)")
+    parser.add_argument("--retrieval-config", default="configs/article_retrieval/article_retrieval.yaml",
                         help="Article retrieval config.")
-    parser.add_argument("--linking-config",   default="configs/linking.yaml",
+    parser.add_argument("--linking-config",   default="configs/linking/linking.yaml",
                         help="Linking pipeline config.")
 
     # ── Force ────────────────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ def main() -> None:
     # Stage 0 — Scraping
     # ──────────────────────────────────────────────────────────────────────────
     if not args.skip_scrape:
-        # Domain is read from configs/scraping.yaml; no CLI domain arg supported
+        # Domain is read from configs/data_processing/scraping.yaml; no CLI domain arg supported
         run_step(
             DATA_PROC / "00_scrape_fandom.py",
             [],

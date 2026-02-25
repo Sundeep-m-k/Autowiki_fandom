@@ -16,7 +16,7 @@ from src.span_identification.baselines import run_baseline
 
 
 def main() -> None:
-    config_path = PROJECT_ROOT / "configs" / "span_id.yaml"
+    config_path = PROJECT_ROOT / "configs" / "span_id" / "span_id.yaml"
     config = load_config(config_path)
 
     research_dir = Path(config["research_dir"])

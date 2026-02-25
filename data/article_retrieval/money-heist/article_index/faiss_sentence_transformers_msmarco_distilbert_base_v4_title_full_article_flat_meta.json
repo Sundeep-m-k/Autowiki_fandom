@@ -1,0 +1,5 @@
+{
+  "model": "sentence-transformers/msmarco-distilbert-base-v4",
+  "n_articles": 267,
+  "index_type": "flat"
+}

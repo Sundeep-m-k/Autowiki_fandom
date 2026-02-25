@@ -132,7 +132,7 @@ def evaluate_for_domain(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate retrieval and reranking results.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default="configs/article_retrieval/article_retrieval.yaml")
     parser.add_argument("--domain", help="Single domain override.")
     parser.add_argument("--retriever", help="Comma-separated retriever names.")
     parser.add_argument("--versions", help="Comma-separated version numbers.")

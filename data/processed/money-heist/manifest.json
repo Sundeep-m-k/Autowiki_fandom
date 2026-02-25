@@ -1,0 +1,38 @@
+{
+  "domain": "money-heist",
+  "created_at": "2026-02-25T10:24:00.748600",
+  "files": [
+    {
+      "path": "paragraphs_money-heist.jsonl",
+      "size_bytes": 2260838
+    },
+    {
+      "path": "sentences_money-heist.jsonl",
+      "size_bytes": 3029857
+    },
+    {
+      "path": "articles_page_granularity_money-heist.jsonl",
+      "size_bytes": 6759589
+    },
+    {
+      "path": "articles_money-heist.jsonl",
+      "size_bytes": 37382
+    },
+    {
+      "path": "paragraphs_money-heist.csv",
+      "size_bytes": 507518
+    },
+    {
+      "path": "paragraph_links_money-heist.csv",
+      "size_bytes": 228254
+    },
+    {
+      "path": "sentences_money-heist.csv",
+      "size_bytes": 592123
+    },
+    {
+      "path": "sentence_links_money-heist.csv",
+      "size_bytes": 224310
+    }
+  ]
+}

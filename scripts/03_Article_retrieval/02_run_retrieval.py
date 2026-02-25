@@ -178,7 +178,7 @@ def run_for_domain(config: dict, domain: str, retrievers: list[str], versions: l
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run article retrieval.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default="configs/article_retrieval/article_retrieval.yaml")
     parser.add_argument("--domain", help="Single domain override.")
     parser.add_argument(
         "--retriever",

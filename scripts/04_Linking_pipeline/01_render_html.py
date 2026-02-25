@@ -76,7 +76,7 @@ def run_for_domain(config: dict, domain: str, force: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render linked articles as HTML.")
-    parser.add_argument("--config", default="configs/linking.yaml")
+    parser.add_argument("--config", default="configs/linking/linking.yaml")
     parser.add_argument("--domain", help="Single domain override.")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()

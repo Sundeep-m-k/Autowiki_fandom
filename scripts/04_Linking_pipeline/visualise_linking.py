@@ -175,7 +175,7 @@ def print_summary(df: pd.DataFrame) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Visualise linking pipeline results.")
-    parser.add_argument("--config", default="configs/linking.yaml")
+    parser.add_argument("--config", default="configs/linking/linking.yaml")
     parser.add_argument("--domain", help="Filter to a single domain.")
     parser.add_argument("--no-show", action="store_true")
     args = parser.parse_args()

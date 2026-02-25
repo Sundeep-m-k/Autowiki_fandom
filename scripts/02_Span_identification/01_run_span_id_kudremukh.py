@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run span identification on Kudremukh (4× GPUs). Uses configs/span_id_kudremukh.yaml.
+"""Run span identification on Kudremukh (4× GPUs). Uses configs/span_id/kudremukh.yaml.
 Trainer auto-uses all visible GPUs for acceleration."""
 from __future__ import annotations
 
@@ -26,10 +26,11 @@ from src.span_identification.preprocess import build_token_dataset
 from src.span_identification.hf_trainer import train_and_evaluate
 from src.span_identification.evaluator import evaluate_example, aggregate_metrics
 from src.span_identification.baselines import run_baseline
+from src.utils.stats_utils import update_span_id_stats
 
 
 def main() -> None:
-    config_path = PROJECT_ROOT / "configs" / "span_id_kudremukh.yaml"
+    config_path = PROJECT_ROOT / "configs" / "span_id" / "kudremukh.yaml"
     config = load_config(config_path)
 
     domains = config.get("domains", ["beverlyhillscop"])
@@ -61,7 +62,24 @@ def main() -> None:
         "char_f1", "exact_match_pct", "wall_time_sec", "checkpoint_path", "notes",
     ]
 
+    # Dedup key for baselines: (experiment_type, granularity, domain, model).
+    # Two baseline runs with the same key are identical (deterministic) — keep only the first.
+    _baseline_seen: set[tuple] = set()
+    if research_csv.exists() and research_csv.stat().st_size > 0:
+        with open(research_csv, newline="") as _f:
+            for _row in csv.DictReader(_f):
+                if _row.get("experiment_type") == "baseline":
+                    _baseline_seen.add(
+                        (_row["experiment_type"], _row["granularity"],
+                         _row["domain"], _row["model"])
+                    )
+
     def append_row(row: dict) -> None:
+        if row.get("experiment_type") == "baseline":
+            key = (row["experiment_type"], row["granularity"], row["domain"], row["model"])
+            if key in _baseline_seen:
+                return
+            _baseline_seen.add(key)
         write_header = not research_csv.exists() or research_csv.stat().st_size == 0
         with open(research_csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
@@ -69,9 +87,10 @@ def main() -> None:
                 w.writeheader()
             w.writerow(row)
 
-    granularities = config.get("granularities", ["sentence", "paragraph", "article"])
-    models = config.get("models", ["bert-base-uncased"])
-    seeds = config.get("seeds", [42])
+    granularities  = config.get("granularities",  ["sentence", "paragraph", "article"])
+    models         = config.get("models",         ["bert-base-uncased"])
+    label_schemes  = config.get("label_schemes",  ["BIO", "BILOU"])
+    seeds          = config.get("seeds",          [42])
     data_fractions = config.get("data_fractions", [1.0])
 
     if config.get("run_baselines"):
@@ -121,74 +140,122 @@ def main() -> None:
                 except FileNotFoundError as e:
                     log.warning("[main] skipping baseline %s/%s: %s", domain, granularity, e)
 
-    log.info("[main] starting model experiments models=%s seeds=%s data_fractions=%s", models, seeds, data_fractions)
+    log.info(
+        "[main] starting model experiments "
+        "models=%s label_schemes=%s seeds=%s data_fractions=%s",
+        models, label_schemes, seeds, data_fractions,
+    )
     for domain in domains:
-        log = setup_span_id_logger(log_dir=str(get_span_id_log_dir(config, domain)), script_name="01_run_span_id_kudremukh")
+        log = setup_span_id_logger(
+            log_dir=str(get_span_id_log_dir(config, domain)),
+            script_name="01_run_span_id_kudremukh",
+        )
         for granularity in granularities:
-            log.info("[main] model domain=%s granularity=%s", domain, granularity)
-
             for model_name in models:
-                train_path = get_token_data_path(config, domain, granularity, model_name, "train")
-                dev_path = get_token_data_path(config, domain, granularity, model_name, "dev")
-                test_path = get_token_data_path(config, domain, granularity, model_name, "test")
-                if not train_path.exists():
-                    try:
-                        log.info("[main] building token dataset domain=%s gran=%s model=%s", domain, granularity, model_name)
-                        build_token_dataset(config, domain, granularity, model_name)
-                    except FileNotFoundError as e:
-                        log.warning("[main] skipping %s/%s: %s", domain, granularity, e)
-                        continue
+                for label_scheme in label_schemes:
+                    log.info(
+                        "[main] domain=%s gran=%s model=%s scheme=%s",
+                        domain, granularity, model_name, label_scheme,
+                    )
 
-                for frac in data_fractions:
-                    for seed in seeds:
-                        ckpt_dir = get_checkpoint_dir(config, run_id, domain)
-                        ckpt_sub = ckpt_dir / f"{granularity}_{domain}_{model_name.replace('/', '_')}_seed{seed}_frac{frac}"
-                        ckpt_sub.mkdir(parents=True, exist_ok=True)
-                        log.info("[main] CHECKPOINT model=%s gran=%s seed=%s frac=%.2f", model_name, granularity, seed, frac)
+                    train_path = get_token_data_path(
+                        config, domain, granularity, model_name, "train", label_scheme
+                    )
+                    dev_path = get_token_data_path(
+                        config, domain, granularity, model_name, "dev", label_scheme
+                    )
+                    test_path = get_token_data_path(
+                        config, domain, granularity, model_name, "test", label_scheme
+                    )
 
-                        result = train_and_evaluate(
-                            config=config,
-                            train_path=train_path,
-                            dev_path=dev_path,
-                            test_path=test_path,
-                            output_dir=ckpt_sub,
-                            model_name=model_name,
-                            seed=seed,
-                            data_fraction=frac,
-                        )
+                    if not train_path.exists():
+                        try:
+                            log.info(
+                                "[main] building token dataset domain=%s gran=%s "
+                                "model=%s scheme=%s",
+                                domain, granularity, model_name, label_scheme,
+                            )
+                            build_token_dataset(
+                                config, domain, granularity, model_name,
+                                label_scheme=label_scheme,
+                            )
+                        except FileNotFoundError as e:
+                            log.warning(
+                                "[main] skipping %s/%s/%s: %s",
+                                domain, granularity, label_scheme, e,
+                            )
+                            continue
 
-                        with open(train_path) as f:
-                            train_size = sum(1 for _ in f)
-                        with open(dev_path) as f:
-                            val_size = sum(1 for _ in f)
-                        if frac < 1.0:
-                            train_size = max(1, int(train_size * frac))
+                    for frac in data_fractions:
+                        for seed in seeds:
+                            ckpt_dir = get_checkpoint_dir(config, run_id, domain)
+                            ckpt_sub = (
+                                ckpt_dir
+                                / f"{granularity}_{domain}"
+                                  f"_{model_name.replace('/', '_')}"
+                                  f"_{label_scheme}_seed{seed}_frac{frac}"
+                            )
+                            ckpt_sub.mkdir(parents=True, exist_ok=True)
+                            log.info(
+                                "[main] training model=%s gran=%s scheme=%s seed=%s frac=%.2f",
+                                model_name, granularity, label_scheme, seed, frac,
+                            )
 
-                        log.info("[main] training done val_f1=%.4f test_f1=%.4f wall_time=%.1fs",
-                                 result.get("val_span_f1", 0), result.get("span_f1", 0), result.get("wall_time_sec", 0))
-                        append_row({
-                            "run_id": run_id,
-                            "timestamp": datetime.now().isoformat(),
-                            "seed": seed,
-                            "experiment_type": "model",
-                            "granularity": granularity,
-                            "domain": domain,
-                            "model": model_name,
-                            "label_scheme": "BILOU",
-                            "data_fraction": frac,
-                            "train_size": train_size,
-                            "val_size": val_size,
-                            "val_span_f1": result.get("val_span_f1", 0),
-                            "span_f1": result.get("span_f1", 0),
-                            "span_precision": result.get("span_precision", 0),
-                            "span_recall": result.get("span_recall", 0),
-                            "char_f1": result.get("char_f1", 0),
-                            "exact_match_pct": result.get("exact_match_pct", 0),
-                            "wall_time_sec": result.get("wall_time_sec", 0),
-                            "checkpoint_path": str(ckpt_sub),
-                            "notes": "kudremukh",
-                        })
-                        log.info("[main] done: %s %s %s seed=%s -> F1=%.4f", domain, granularity, model_name, seed, result.get("span_f1", 0))
+                            result = train_and_evaluate(
+                                config=config,
+                                train_path=train_path,
+                                dev_path=dev_path,
+                                test_path=test_path,
+                                output_dir=ckpt_sub,
+                                model_name=model_name,
+                                seed=seed,
+                                data_fraction=frac,
+                                label_scheme=label_scheme,
+                            )
+
+                            with open(train_path) as f:
+                                train_size = sum(1 for _ in f)
+                            with open(dev_path) as f:
+                                val_size = sum(1 for _ in f)
+                            if frac < 1.0:
+                                train_size = max(1, int(train_size * frac))
+
+                            log.info(
+                                "[main] done val_f1=%.4f test_f1=%.4f wall_time=%.1fs",
+                                result.get("val_span_f1", 0),
+                                result.get("span_f1", 0),
+                                result.get("wall_time_sec", 0),
+                            )
+                            append_row({
+                                "run_id": run_id,
+                                "timestamp": datetime.now().isoformat(),
+                                "seed": seed,
+                                "experiment_type": "model",
+                                "granularity": granularity,
+                                "domain": domain,
+                                "model": model_name,
+                                "label_scheme": label_scheme,
+                                "data_fraction": frac,
+                                "train_size": train_size,
+                                "val_size": val_size,
+                                "val_span_f1": result.get("val_span_f1", 0),
+                                "span_f1": result.get("span_f1", 0),
+                                "span_precision": result.get("span_precision", 0),
+                                "span_recall": result.get("span_recall", 0),
+                                "char_f1": result.get("char_f1", 0),
+                                "exact_match_pct": result.get("exact_match_pct", 0),
+                                "wall_time_sec": result.get("wall_time_sec", 0),
+                                "checkpoint_path": str(ckpt_sub),
+                                "notes": "kudremukh",
+                            })
+                            log.info(
+                                "[main] %s %s %s %s seed=%s -> F1=%.4f",
+                                domain, granularity, model_name, label_scheme,
+                                seed, result.get("span_f1", 0),
+                            )
+
+    for domain in domains:
+        update_span_id_stats(domain, research_csv)
 
     log.info("[main] run complete. Results appended to %s", research_csv)
 

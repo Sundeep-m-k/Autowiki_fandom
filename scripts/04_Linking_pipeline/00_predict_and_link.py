@@ -177,7 +177,7 @@ def run_for_domain(config: dict, domain: str, force: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Link spans using Task 2 results.")
-    parser.add_argument("--config", default="configs/linking.yaml")
+    parser.add_argument("--config", default="configs/linking/linking.yaml")
     parser.add_argument("--domain", help="Single domain override.")
     parser.add_argument("--force", action="store_true", help="Recompute even if cached.")
     args = parser.parse_args()

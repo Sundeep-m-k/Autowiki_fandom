@@ -1,0 +1,34 @@
+# Error analysis config — span identification.
+# Inherits all paths and model/label-scheme lists from span_id_base.yaml.
+# Only override what is specific to error analysis here.
+base: "base.yaml"
+
+# ── Domains / granularities / models to analyse ───────────────────────────────
+# Mirror these from the training config you actually ran.
+domains: ["beverlyhillscop"]
+
+granularities: ["sentence", "paragraph", "article"]
+
+models:
+  - "bert-base-uncased"
+  - "microsoft/deberta-v3-base"
+  - "SpanBERT/spanbert-base-cased"
+  - "roberta-base"
+  - "distilbert-base-uncased"
+
+label_schemes: ["BIO", "BILOU"]
+
+# ── Error analysis settings ───────────────────────────────────────────────────
+error_analysis:
+  # Maximum number of FP / FN example records to sample and save to JSONL.
+  max_fp_samples: 50
+  max_fn_samples: 50
+  # Random seed for the sample (ensures reproducible output).
+  seed: 42
+  # Which experiment types to run.
+  #   "baseline" — uses in-memory baseline runners on the validation split.
+  #   "model"    — loads a saved checkpoint and runs inference on the test split.
+  # Both are run by default; comment out one entry to skip it.
+  experiments:
+    - experiment_type: "baseline"
+    - experiment_type: "model"

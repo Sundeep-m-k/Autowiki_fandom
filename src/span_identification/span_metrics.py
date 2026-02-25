@@ -106,6 +106,28 @@ def _span_level_metrics(
     return {f"{prefix}_precision": precision, f"{prefix}_recall": recall, f"{prefix}_f1": f1}
 
 
+def _exact_match_pct(
+    pred_tags: list[list[str]],
+    true_tags: list[list[str]],
+    label_scheme: LabelScheme,
+) -> float:
+    """
+    Fraction of examples (with ≥1 gold span) where at least one gold span is
+    exactly predicted.  Averaged over examples that have gold spans.
+    """
+    scores: list[float] = []
+    for p_seq, t_seq in zip(pred_tags, true_tags):
+        gold_spans = _spans_from_labels(t_seq, label_scheme)
+        if not gold_spans:
+            continue
+        pred_spans = _spans_from_labels(p_seq, label_scheme)
+        gold_set = set(gold_spans)
+        pred_set = set(pred_spans)
+        matched = len(gold_set & pred_set)
+        scores.append(matched / len(gold_set))
+    return sum(scores) / len(scores) if scores else 0.0
+
+
 def compute_span_metrics_for_trainer(
     eval_pred: tuple[np.ndarray, np.ndarray],
     id2label: dict[int, str],
@@ -115,10 +137,21 @@ def compute_span_metrics_for_trainer(
     """
     Compute seqeval + span metrics for HF Trainer's ``compute_metrics`` callback.
 
+    Metrics returned:
+      eval_f1_seqeval / eval_precision_seqeval / eval_recall_seqeval
+        — token-level seqeval scores (B/I/L/U prefixes).
+      eval_exact_span_{precision,recall,f1}
+        — span-level exact-boundary match.
+      eval_relaxed_span_{precision,recall,f1}
+        — span-level overlap match (proxy for character-level F1).
+      eval_exact_match_pct
+        — fraction of gold spans exactly recalled, averaged over examples
+          that contain at least one gold span.
+
     Args:
         eval_pred:    (logits, label_ids) arrays from the Trainer.
-        id2label:     Mapping from label id to tag string (e.g. ``{0: "O", 1: "B-SPAN", ...}``).
-        label_scheme: ``"BIO"`` or ``"BILOU"`` — controls how spans are decoded from the tags.
+        id2label:     Mapping from label id to tag string.
+        label_scheme: ``"BIO"`` or ``"BILOU"``.
         ignore_index: Label id used for padding/special tokens (default -100).
     """
     logits, labels = eval_pred
@@ -137,5 +170,7 @@ def compute_span_metrics_for_trainer(
         metrics[f"eval_{k}"] = v
     for k, v in _span_level_metrics(pred_tags, true_tags, label_scheme, match="overlap").items():
         metrics[f"eval_{k}"] = v
+
+    metrics["eval_exact_match_pct"] = _exact_match_pct(pred_tags, true_tags, label_scheme)
 
     return metrics

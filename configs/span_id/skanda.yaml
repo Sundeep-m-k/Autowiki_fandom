@@ -1,0 +1,13 @@
+# Span identification — Skanda (1× RTX A6000).
+# Run: python scripts/02_Span_identification/01_run_span_id_skanda.py
+# Inherits all defaults from span_id_base.yaml and overrides only what differs.
+base: "base.yaml"
+
+domains: ["beverlyhillscop"]
+
+models:
+  - "bert-base-uncased"
+  - "microsoft/deberta-v3-base"
+  - "SpanBERT/spanbert-base-cased"
+  - "roberta-base"
+  - "distilbert-base-uncased"

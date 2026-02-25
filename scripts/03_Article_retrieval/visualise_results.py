@@ -299,7 +299,7 @@ def print_summary(df: pd.DataFrame) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Visualise article retrieval results.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default="configs/article_retrieval/article_retrieval.yaml")
     parser.add_argument("--domain", help="Filter to a single domain.")
     parser.add_argument("--no-show", action="store_true", help="Save only, do not show plots.")
     args = parser.parse_args()

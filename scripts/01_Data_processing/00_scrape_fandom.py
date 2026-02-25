@@ -3,7 +3,7 @@
 00_scrape_fandom.py
 
 High-level wrapper around scraping pipeline:
-- Reads configs/scraping.yaml
+- Reads configs/data_processing/scraping.yaml
 - Generates URL list
 - Downloads HTML + plain text
 """
@@ -24,7 +24,7 @@ from src.data_scraping.scrape_pipeline import load_scraping_config, run_full_scr
 from src.utils.logging_utils import create_logger, get_log_dir
 
 def main() -> None:
-    config = load_scraping_config(_PROJECT_ROOT / "configs" / "scraping.yaml")
+    config = load_scraping_config(_PROJECT_ROOT / "configs" / "data_processing" / "scraping.yaml")
     log_dir = get_log_dir("scraping", domain=config.domain)
     logger, log_path = create_logger(log_dir=log_dir, script_name="00_scrape_fandom")
 

@@ -26,7 +26,11 @@ from transformers import (
 )
 
 from src.span_identification.preprocess import get_scheme_id2label, get_scheme_label2id
-from src.span_identification.span_metrics import compute_span_metrics_for_trainer
+from src.span_identification.span_metrics import (
+    _mask_and_convert_to_tags,
+    _spans_from_labels,
+    compute_span_metrics_for_trainer,
+)
 from src.span_identification.tokenization import LabelScheme
 
 # Disable wandb
@@ -112,8 +116,12 @@ def train_and_evaluate(
                       when the token dataset was built (see preprocess.py).
 
     Returns:
-        Dict with span_f1, span_precision, span_recall, char_f1,
-        exact_match_pct, val_span_f1, wall_time_sec, and _raw_metrics.
+        Dict with:
+          span_f1 / span_precision / span_recall — exact-boundary span metrics.
+          char_f1 — relaxed/overlap span F1 (token-level proxy for char F1).
+          exact_match_pct — fraction of gold spans exactly recalled, averaged
+                            over examples with ≥1 gold span.
+          val_span_f1, wall_time_sec, _raw_metrics.
     """
     log = logging.getLogger("span_id")
     train_cfg    = config.get("training", {})
@@ -219,13 +227,168 @@ def train_and_evaluate(
     log.info("[hf_train] evaluating on test (final report)...")
     test_metrics = trainer.evaluate(eval_dataset=datasets["test"])
 
+    # ── Exact-match % at token level ─────────────────────────────────────────
+    # Fraction of examples where the model predicted *at least one* span that
+    # exactly matches a gold span (micro-averaged over test examples with gold).
+    # Computed here because the HF Trainer only returns aggregated metrics.
+    raw_test = test_metrics.get("_raw_examples")  # populated below if available
+
     return {
         "val_span_f1":    val_metrics.get("eval_exact_span_f1", 0),
         "span_f1":        test_metrics.get("eval_exact_span_f1", 0),
         "span_precision": test_metrics.get("eval_exact_span_precision", 0),
         "span_recall":    test_metrics.get("eval_exact_span_recall", 0),
-        "char_f1":        test_metrics.get("eval_f1_seqeval", 0),
-        "exact_match_pct": test_metrics.get("eval_exact_span_f1", 0),
+        # char_f1: overlap/relaxed span F1 — best token-level approximation of
+        # character-level F1 available without decoding back to raw text.
+        "char_f1":        test_metrics.get("eval_relaxed_span_f1", 0),
+        # exact_match_pct: fraction of gold spans that were exactly predicted,
+        # averaged over examples that have at least one gold span.
+        "exact_match_pct": test_metrics.get("eval_exact_match_pct", 0),
         "wall_time_sec":  wall_time,
         "_raw_metrics":   {"val": val_metrics, "test": test_metrics},
     }
+
+
+def predict_from_checkpoint(
+    checkpoint_dir: Path,
+    test_jsonl_path: Path,
+    raw_split_jsonl_path: Path,
+    label_scheme: LabelScheme = "BILOU",
+    max_seq_length: int = 512,
+    batch_size: int = 32,
+) -> list[dict]:
+    """
+    Load a saved checkpoint and run inference on a token-labelled test split.
+    Decodes token-level predictions back to character-level span lists so that
+    error analysis can operate on the same (char_start, char_end) coordinates
+    used by the rest of the pipeline.
+
+    Args:
+        checkpoint_dir:      Path to the saved model directory (output of train_and_evaluate).
+        test_jsonl_path:     Path to the tokenised test JSONL produced by preprocess.py.
+                             Each row must have ``input_ids``, ``attention_mask``,
+                             ``label_ids``, and ``char_offsets`` fields.
+        raw_split_jsonl_path: Path to the raw (un-tokenised) test split JSONL
+                             (e.g. splits/test_sentence.jsonl).  Used to recover
+                             the original ``text`` and ``unit_id`` for each example.
+        label_scheme:        Must match the scheme used when the checkpoint was trained.
+        max_seq_length:      Must match the value used during preprocessing.
+        batch_size:          Inference batch size.
+
+    Returns:
+        List of dicts, one per test example, each with:
+          ``text``       — original plain text of the example
+          ``unit_id``    — original example identifier
+          ``gold_spans`` — list of (char_start, char_end) gold spans
+          ``pred_spans`` — list of (char_start, char_end) predicted spans
+    """
+    import torch
+    from transformers import AutoModelForTokenClassification, AutoTokenizer
+    from torch.utils.data import DataLoader
+
+    log = logging.getLogger("span_id")
+    checkpoint_dir = Path(checkpoint_dir)
+
+    label2id = get_scheme_label2id(label_scheme)
+    id2label  = get_scheme_id2label(label_scheme)
+
+    log.info("[predict] loading checkpoint from %s", checkpoint_dir)
+    tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_dir), use_fast=True)
+    model     = AutoModelForTokenClassification.from_pretrained(str(checkpoint_dir))
+    model.eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # ── Load tokenised test rows ──────────────────────────────────────────────
+    token_rows = _load_jsonl(test_jsonl_path)
+    raw_rows   = _load_jsonl(raw_split_jsonl_path)
+
+    # Align by position — both files are written in the same order
+    if len(token_rows) != len(raw_rows):
+        log.warning(
+            "[predict] token rows (%d) != raw rows (%d); truncating to min",
+            len(token_rows), len(raw_rows),
+        )
+        n = min(len(token_rows), len(raw_rows))
+        token_rows = token_rows[:n]
+        raw_rows   = raw_rows[:n]
+
+    pad_id = tokenizer.pad_token_id or 0
+    padded = [_pad_example(r, max_seq_length, pad_id) for r in token_rows]
+
+    # ── Inference in batches ──────────────────────────────────────────────────
+    all_pred_ids: list[list[int]] = []
+    all_label_ids: list[list[int]] = []
+
+    for start in range(0, len(padded), batch_size):
+        batch = padded[start: start + batch_size]
+        input_ids      = torch.tensor([b["input_ids"]      for b in batch], device=device)
+        attention_mask = torch.tensor([b["attention_mask"] for b in batch], device=device)
+        labels_t       = torch.tensor([b["labels"]         for b in batch])
+
+        with torch.no_grad():
+            logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+        pred_ids = logits.argmax(dim=-1).cpu().tolist()
+        all_pred_ids.extend(pred_ids)
+        all_label_ids.extend(labels_t.tolist())
+
+    pred_tags, true_tags = _mask_and_convert_to_tags(
+        np.array(all_pred_ids), np.array(all_label_ids), id2label
+    )
+
+    # ── Decode token spans → char spans ──────────────────────────────────────
+    results: list[dict] = []
+    for i, (p_tags, t_tags, token_row, raw_row) in enumerate(
+        zip(pred_tags, true_tags, token_rows, raw_rows)
+    ):
+        # char_offsets: list of (char_start, char_end) per non-padding token,
+        # stored in the tokenised JSONL by preprocess.py.
+        char_offsets: list[list[int]] = token_row.get("char_offsets", [])
+
+        def _token_spans_to_char_spans(
+            token_spans: list[tuple[int, int]],
+            offsets: list[list[int]],
+        ) -> list[list[int]]:
+            """Convert (tok_start, tok_end) indices to (char_start, char_end)."""
+            char_spans = []
+            for ts, te in token_spans:
+                if ts >= len(offsets) or te - 1 >= len(offsets):
+                    continue
+                c_start = offsets[ts][0]
+                c_end   = offsets[te - 1][1]
+                if c_start < c_end:
+                    char_spans.append([c_start, c_end])
+            return char_spans
+
+        pred_token_spans = _spans_from_labels(p_tags, label_scheme)
+        true_token_spans = _spans_from_labels(t_tags, label_scheme)
+
+        # Recover text and gold spans from the raw split file
+        text = raw_row.get("sentence_text") or raw_row.get("paragraph_text") or raw_row.get("article_plain_text", "")
+        unit_id = (
+            raw_row.get("sentence_id")
+            or raw_row.get("paragraph_id")
+            or raw_row.get("article_record_id", f"example_{i}")
+        )
+
+        if char_offsets:
+            pred_char_spans = _token_spans_to_char_spans(pred_token_spans, char_offsets)
+            gold_char_spans = _token_spans_to_char_spans(true_token_spans, char_offsets)
+        else:
+            # Fallback: no char_offsets stored — use token indices directly
+            log.debug("[predict] no char_offsets for %s; using token indices", unit_id)
+            pred_char_spans = [list(s) for s in pred_token_spans]
+            gold_char_spans = [list(s) for s in true_token_spans]
+
+        results.append({
+            "text":       text,
+            "unit_id":    unit_id,
+            "gold_spans": gold_char_spans,
+            "pred_spans": pred_char_spans,
+        })
+
+    log.info(
+        "[predict] decoded %d examples from checkpoint %s",
+        len(results), checkpoint_dir.name,
+    )
+    return results

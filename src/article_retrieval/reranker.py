@@ -39,6 +39,8 @@ import json
 import logging
 from pathlib import Path
 
+from article_retrieval.retriever import load_retrieval_results
+
 log = logging.getLogger("article_retrieval")
 
 

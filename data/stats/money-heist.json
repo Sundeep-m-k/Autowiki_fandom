@@ -1,0 +1,37 @@
+{
+  "domain": "money-heist",
+  "updated_at": "2026-02-25T10:06:37.967404",
+  "scraping": {
+    "total_urls": 357,
+    "downloaded": 267,
+    "skipped": 88,
+    "failed": 2,
+    "html_bytes": {
+      "total": 79322038,
+      "avg": 297086.28464419476,
+      "max": 470891
+    },
+    "text_bytes": {
+      "total": 700881,
+      "avg": 2625.0224719101125,
+      "max": 13940
+    }
+  },
+  "dataset_stats": {
+    "num_articles": 267,
+    "num_paragraphs": 1679,
+    "num_sentences": 4133,
+    "num_links": 19846,
+    "link_type_counts": {
+      "other": 5266,
+      "external": 246,
+      "internal": 13636,
+      "file": 698
+    },
+    "avg_article_length_chars": 3602,
+    "max_article_length_chars": 15230,
+    "avg_internal_links_per_article": 51.07,
+    "num_articles_with_no_internal_links": 0,
+    "updated_at": "2026-02-25T10:24:00.865848"
+  }
+}

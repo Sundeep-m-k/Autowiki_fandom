@@ -58,7 +58,7 @@ class ScrapingConfig:
 
 def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
     if config_path is None:
-        config_path = PROJECT_ROOT / "configs" / "scraping.yaml"
+        config_path = PROJECT_ROOT / "configs" / "data_processing" / "scraping.yaml"
 
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -72,7 +72,7 @@ def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
     cfg = cfg or {}
 
     if "base_url" not in cfg:
-        raise ValueError("'base_url' must be defined in configs/scraping.yaml")
+        raise ValueError("'base_url' must be defined in configs/data_processing/scraping.yaml")
 
     base_url = str(cfg["base_url"]).strip().rstrip("/")
     if not base_url.startswith(("http://", "https://")):

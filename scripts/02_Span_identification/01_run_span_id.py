@@ -36,7 +36,7 @@ from src.utils.stats_utils import update_span_id_stats
 
 
 def main() -> None:
-    config_path = PROJECT_ROOT / "configs" / "span_id.yaml"
+    config_path = PROJECT_ROOT / "configs" / "span_id" / "span_id.yaml"
     config = load_config(config_path)
 
     domains = config.get("domains", ["beverlyhillscop"])
@@ -67,7 +67,24 @@ def main() -> None:
         "char_f1", "exact_match_pct", "wall_time_sec", "checkpoint_path", "notes",
     ]
 
+    # Dedup key for baselines: (experiment_type, granularity, domain, model).
+    # Two baseline runs with the same key are identical (deterministic) — keep only the first.
+    _baseline_seen: set[tuple] = set()
+    if research_csv.exists() and research_csv.stat().st_size > 0:
+        with open(research_csv, newline="") as _f:
+            for _row in csv.DictReader(_f):
+                if _row.get("experiment_type") == "baseline":
+                    _baseline_seen.add(
+                        (_row["experiment_type"], _row["granularity"],
+                         _row["domain"], _row["model"])
+                    )
+
     def append_row(row: dict) -> None:
+        if row.get("experiment_type") == "baseline":
+            key = (row["experiment_type"], row["granularity"], row["domain"], row["model"])
+            if key in _baseline_seen:
+                return
+            _baseline_seen.add(key)
         write_header = not research_csv.exists() or research_csv.stat().st_size == 0
         with open(research_csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
@@ -77,7 +94,7 @@ def main() -> None:
 
     granularities = config.get("granularities", ["sentence", "paragraph", "article"])
     models        = config.get("models", ["bert-base-uncased"])
-    label_schemes = config.get("label_schemes", ["BILOU"])
+    label_schemes = config.get("label_schemes", ["BIO", "BILOU"])
     seeds         = config.get("seeds", [42])
     data_fractions = config.get("data_fractions", [1.0])
 

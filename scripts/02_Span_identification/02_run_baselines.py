@@ -16,7 +16,7 @@ from src.span_identification.evaluator import evaluate_example, aggregate_metric
 
 
 def main():
-    config_path = PROJECT_ROOT / "configs" / "span_id.yaml"
+    config_path = PROJECT_ROOT / "configs" / "span_id" / "span_id.yaml"
     config = load_config(config_path)
 
     domains = config.get("domains", ["beverlyhillscop"])
