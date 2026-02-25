@@ -27,6 +27,7 @@ htmlcov/
 data/raw/
 data/span_id/*/checkpoints/
 data/span_id/*/token_data/
+data/logs/
 
 # Legacy/duplicate
 autowiki/

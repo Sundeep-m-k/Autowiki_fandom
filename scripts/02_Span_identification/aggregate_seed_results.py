@@ -40,7 +40,7 @@ def main() -> None:
         key = (r["domain"], r["granularity"], r["model"], str(r.get("data_fraction", "1.0")))
         groups[key].append(r)
 
-    metric_keys = ["val_span_f1", "span_f1", "span_precision", "span_recall", "token_f1", "exact_match_pct", "wall_time_sec"]
+    metric_keys = ["val_span_f1", "span_f1", "span_precision", "span_recall", "char_f1", "exact_match_pct", "wall_time_sec"]
 
     out_rows = []
     for (domain, gran, model, frac), group in sorted(groups.items()):

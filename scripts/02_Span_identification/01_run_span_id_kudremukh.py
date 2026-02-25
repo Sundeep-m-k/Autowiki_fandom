@@ -54,18 +54,18 @@ def main() -> None:
     research_csv.parent.mkdir(parents=True, exist_ok=True)
     log.info("[main] research_csv=%s", research_csv)
 
-    csv_exists = research_csv.exists()
     fieldnames = [
         "run_id", "timestamp", "seed", "experiment_type",
         "granularity", "domain", "model", "label_scheme", "data_fraction",
         "train_size", "val_size", "val_span_f1", "span_f1", "span_precision", "span_recall",
-        "token_f1", "exact_match_pct", "wall_time_sec", "checkpoint_path", "notes",
+        "char_f1", "exact_match_pct", "wall_time_sec", "checkpoint_path", "notes",
     ]
 
     def append_row(row: dict) -> None:
+        write_header = not research_csv.exists() or research_csv.stat().st_size == 0
         with open(research_csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            if not csv_exists:
+            if write_header:
                 w.writeheader()
             w.writerow(row)
 
@@ -112,7 +112,7 @@ def main() -> None:
                             "span_f1": m_test.get("span_f1", 0),
                             "span_precision": m_test.get("span_precision", 0),
                             "span_recall": m_test.get("span_recall", 0),
-                            "token_f1": m_test.get("token_f1", 0),
+                            "char_f1": m_test.get("char_f1", 0),
                             "exact_match_pct": m_test.get("exact_match_pct", 0),
                             "wall_time_sec": 0,
                             "checkpoint_path": "",
@@ -182,7 +182,7 @@ def main() -> None:
                             "span_f1": result.get("span_f1", 0),
                             "span_precision": result.get("span_precision", 0),
                             "span_recall": result.get("span_recall", 0),
-                            "token_f1": result.get("token_f1", 0),
+                            "char_f1": result.get("char_f1", 0),
                             "exact_match_pct": result.get("exact_match_pct", 0),
                             "wall_time_sec": result.get("wall_time_sec", 0),
                             "checkpoint_path": str(ckpt_sub),

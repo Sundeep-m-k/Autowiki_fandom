@@ -1,4 +1,15 @@
-"""Training loop with checkpointing for span identification."""
+"""
+Custom PyTorch training loop for span identification.
+
+DEPRECATED: This module is superseded by hf_trainer.py which uses the
+HuggingFace Trainer API. All active experiment scripts call
+hf_trainer.train_and_evaluate instead. This file is retained for reference
+only and is not exercised by any current script path.
+
+WARNING: The evaluate() function references model.id2label and
+model.label_scheme which do not exist on AutoModelForTokenClassification.
+Do not call this module with HF models.
+"""
 from __future__ import annotations
 
 import logging

@@ -13,16 +13,19 @@ def setup_span_id_logger(
     script_name: str = "span_id",
     level: int = logging.INFO,
 ) -> logging.Logger:
-    """Setup logger with file and console handlers. log_dir: data/logs/<domain>/span_id/"""
+    """Setup logger with file and console handlers. log_dir: data/logs/<domain>/span_id/
+
+    Safe to call multiple times (e.g. when switching domains in a sweep): all
+    existing handlers are closed and removed before new ones are added, so
+    there is never more than one file handler or one console handler active.
+    """
     logger = logging.getLogger("span_id")
-    # Remove existing file handlers when switching log dir (e.g. new domain)
     for h in list(logger.handlers):
-        if isinstance(h, logging.FileHandler):
-            logger.removeHandler(h)
-            try:
-                h.close()
-            except Exception:
-                pass
+        logger.removeHandler(h)
+        try:
+            h.close()
+        except Exception:
+            pass
 
     logger.setLevel(level)
     formatter = logging.Formatter(
@@ -39,12 +42,10 @@ def setup_span_id_logger(
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
-    # Console handler (add only if none)
-    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in logger.handlers):
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setLevel(level)
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(level)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
 
     logger.info("Log file: %s", log_file.resolve())
     return logger

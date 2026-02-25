@@ -1,4 +1,8 @@
 # Span identification dependencies (in addition to base requirements)
 torch>=2.0
 transformers>=4.30
+datasets
+seqeval
 pyyaml>=6.0
+nltk
+numpy

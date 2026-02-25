@@ -1,4 +1,11 @@
-"""BERT/RoBERTa token classifier for span identification."""
+"""
+Custom BERT/RoBERTa token classifier for span identification.
+
+DEPRECATED: This module is superseded by AutoModelForTokenClassification
+loaded in hf_trainer.py. All active experiment scripts use the HuggingFace
+Trainer path and never instantiate TokenClassifierForSpans. Retained for
+reference only.
+"""
 from __future__ import annotations
 
 from typing import Any

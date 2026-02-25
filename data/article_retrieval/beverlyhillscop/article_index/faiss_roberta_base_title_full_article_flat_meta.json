@@ -1,0 +1,5 @@
+{
+  "model": "roberta-base",
+  "n_articles": 129,
+  "index_type": "flat"
+}

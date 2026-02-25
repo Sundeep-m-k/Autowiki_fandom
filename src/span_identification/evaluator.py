@@ -33,24 +33,24 @@ def span_f1(
     return precision, recall, f1
 
 
-def token_f1(
+def char_f1(
     gold_spans: list[tuple[int, int]],
     pred_spans: list[tuple[int, int]],
     text_length: int,
 ) -> tuple[float, float, float]:
-    """Token-level F1: treat each char position as a token."""
-    gold_tokens = set()
+    """Character-level F1: treat each character position as a unit."""
+    gold_chars = set()
     for s, e in gold_spans:
         for i in range(s, min(e, text_length)):
-            gold_tokens.add(i)
-    pred_tokens = set()
+            gold_chars.add(i)
+    pred_chars = set()
     for s, e in pred_spans:
         for i in range(s, min(e, text_length)):
-            pred_tokens.add(i)
+            pred_chars.add(i)
 
-    tp = len(gold_tokens & pred_tokens)
-    precision = tp / len(pred_tokens) if pred_tokens else 0.0
-    recall = tp / len(gold_tokens) if gold_tokens else 0.0
+    tp = len(gold_chars & pred_chars)
+    precision = tp / len(pred_chars) if pred_chars else 0.0
+    recall = tp / len(gold_chars) if gold_chars else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     return precision, recall, f1
 
@@ -58,10 +58,14 @@ def token_f1(
 def exact_match_pct(
     gold_spans: list[tuple[int, int]],
     pred_spans: list[tuple[int, int]],
-) -> float:
-    """Percentage of gold spans exactly matched by a predicted span."""
+) -> float | None:
+    """
+    Percentage of gold spans exactly matched by a predicted span.
+    Returns None when there are no gold spans so the caller can exclude
+    such examples from the mean rather than inflating it.
+    """
     if not gold_spans:
-        return 1.0
+        return None
     gold_set = {tuple(s) for s in gold_spans}
     pred_set = {tuple(s) for s in pred_spans}
     matched = len(gold_set & pred_set)
@@ -80,19 +84,19 @@ def evaluate_example(
     gold_spans: list[tuple[int, int]],
     pred_spans: list[tuple[int, int]],
     text_length: int,
-) -> dict[str, float]:
+) -> dict[str, float | None]:
     """Compute all metrics for one example."""
     p, r, f = span_f1(gold_spans, pred_spans)
-    tp, tr, tf = token_f1(gold_spans, pred_spans, text_length)
+    cp, cr, cf = char_f1(gold_spans, pred_spans, text_length)
     em = exact_match_pct(gold_spans, pred_spans)
     op, oa, of = overlap_f1(gold_spans, pred_spans)
     return {
         "span_precision": p,
         "span_recall": r,
         "span_f1": f,
-        "token_precision": tp,
-        "token_recall": tr,
-        "token_f1": tf,
+        "char_precision": cp,
+        "char_recall": cr,
+        "char_f1": cf,
         "exact_match_pct": em,
         "overlap_precision": op,
         "overlap_recall": oa,
@@ -100,13 +104,13 @@ def evaluate_example(
     }
 
 
-def aggregate_metrics(example_metrics: list[dict[str, float]]) -> dict[str, float]:
-    """Average metrics across examples (micro averaging)."""
+def aggregate_metrics(example_metrics: list[dict[str, float | None]]) -> dict[str, float]:
+    """Average metrics across examples, skipping None values (e.g. exact_match_pct on empty gold)."""
     if not example_metrics:
         return {}
     keys = example_metrics[0].keys()
     out = {}
     for k in keys:
-        vals = [m[k] for m in example_metrics if k in m]
+        vals = [m[k] for m in example_metrics if k in m and m[k] is not None]
         out[k] = sum(vals) / len(vals) if vals else 0.0
     return out

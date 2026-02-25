@@ -1,4 +1,9 @@
-"""Fandom-style preprocessing: build token-level BILOU datasets from raw units."""
+"""Fandom-style preprocessing: build token-level datasets from raw units.
+
+Supports BIO and BILOU label schemes (and any scheme from tokenization.py).
+The label scheme is a first-class parameter throughout; BILOU is kept as the
+default to preserve backward compatibility with existing datasets on disk.
+"""
 from __future__ import annotations
 
 import json
@@ -11,12 +16,53 @@ from transformers import AutoTokenizer
 
 from src.span_identification.config_utils import get_processed_path, get_token_data_path
 from src.span_identification.dataset import create_splits, load_units
+from src.span_identification.tokenization import LabelScheme, get_label2id, get_id2label
 
-# Fandom-style BILOU labels (single entity type: SPAN)
+# ---------------------------------------------------------------------------
+# Scheme-aware label/id maps (built on demand via helpers below)
+# ---------------------------------------------------------------------------
+
+# Legacy BILOU globals kept for any external code that imported them directly.
+_BILOU_LABEL2ID = get_label2id("BILOU")
+_BILOU_ID2LABEL = get_id2label("BILOU")
+
+# These are still exported under the old names so existing imports don't break,
+# but callers that need a specific scheme should use get_label2id / get_id2label.
 BILOU_LABELS = ["O", "B-SPAN", "I-SPAN", "L-SPAN", "U-SPAN"]
-LABEL2ID = {label: i for i, label in enumerate(BILOU_LABELS)}
-ID2LABEL = {v: k for k, v in LABEL2ID.items()}
+LABEL2ID = _BILOU_LABEL2ID
+ID2LABEL = _BILOU_ID2LABEL
 
+
+# ---------------------------------------------------------------------------
+# Scheme-aware label maps — use these everywhere new code is written
+# ---------------------------------------------------------------------------
+
+def get_scheme_label2id(label_scheme: LabelScheme) -> dict[str, int]:
+    """Return label→id mapping for a scheme, using SPAN-suffixed keys for seqeval."""
+    raw = get_label2id(label_scheme)
+    if label_scheme == "BILOU":
+        # Map raw single-char keys to seqeval-compatible B-SPAN / I-SPAN etc.
+        _seqeval = {
+            "O": 0,
+            "B-SPAN": raw["B"],
+            "I-SPAN": raw["I"],
+            "L-SPAN": raw["L"],
+            "U-SPAN": raw["U"],
+        }
+        return _seqeval
+    if label_scheme == "BIO":
+        return {"O": 0, "B-SPAN": raw["B"], "I-SPAN": raw["I"]}
+    # Fall back to raw keys for IO / BIEOS
+    return raw
+
+
+def get_scheme_id2label(label_scheme: LabelScheme) -> dict[int, str]:
+    return {v: k for k, v in get_scheme_label2id(label_scheme).items()}
+
+
+# ---------------------------------------------------------------------------
+# Span extraction helpers
+# ---------------------------------------------------------------------------
 
 def _spans_from_links_internal_only(
     links: list[dict],
@@ -38,17 +84,26 @@ def _spans_from_links_internal_only(
     return spans
 
 
-def assign_bilou_labels(
+# ---------------------------------------------------------------------------
+# Core label assignment (scheme-aware)
+# ---------------------------------------------------------------------------
+
+def assign_labels(
     text: str,
     spans: list[dict[str, int]],
     tokenizer,
     max_seq_length: int,
+    label_scheme: LabelScheme = "BILOU",
 ) -> tuple[list[int], list[int], list[int]]:
     """
-    Assign BILOU labels to token sequence (fandom style).
-    Labels aligned with full input_ids (CLS, tokens, SEP).
-    Uses overlap logic for span-to-token mapping.
+    Assign token-level labels for a given label scheme.
+
+    Returns (input_ids, attention_mask, label_ids) all aligned with the full
+    tokenized sequence (CLS, real tokens, SEP).  Special tokens get label O.
     """
+    label2id = get_scheme_label2id(label_scheme)
+    o_id = label2id["O"]
+
     encoding = tokenizer(
         text,
         return_offsets_mapping=True,
@@ -60,7 +115,7 @@ def assign_bilou_labels(
     input_ids = encoding["input_ids"]
     attention_mask = encoding["attention_mask"]
 
-    labels = [LABEL2ID["O"]] * len(input_ids)
+    labels = [o_id] * len(input_ids)
 
     for sp in spans:
         start_char = int(sp["start"])
@@ -68,35 +123,62 @@ def assign_bilou_labels(
         if end_char <= start_char:
             continue
 
-        token_indices = []
-        for i, (tok_start, tok_end) in enumerate(offsets):
-            if tok_start == tok_end == 0:  # special tokens
-                continue
-            if tok_end <= start_char or tok_start >= end_char:  # no overlap
-                continue
-            token_indices.append(i)
+        token_indices = [
+            i for i, (tok_start, tok_end) in enumerate(offsets)
+            if not (tok_start == tok_end == 0)          # skip special tokens
+            and not (tok_end <= start_char or tok_start >= end_char)  # skip non-overlapping
+        ]
 
         if not token_indices:
             continue
 
-        if len(token_indices) == 1:
-            labels[token_indices[0]] = LABEL2ID["U-SPAN"]
+        if label_scheme == "BILOU":
+            if len(token_indices) == 1:
+                labels[token_indices[0]] = label2id["U-SPAN"]
+            else:
+                labels[token_indices[0]] = label2id["B-SPAN"]
+                for ti in token_indices[1:-1]:
+                    labels[ti] = label2id["I-SPAN"]
+                labels[token_indices[-1]] = label2id["L-SPAN"]
+
+        elif label_scheme == "BIO":
+            labels[token_indices[0]] = label2id["B-SPAN"]
+            for ti in token_indices[1:]:
+                labels[ti] = label2id["I-SPAN"]
+
+        elif label_scheme == "IO":
+            for ti in token_indices:
+                labels[ti] = label2id.get("I", label2id.get("I-SPAN", 1))
+
         else:
-            labels[token_indices[0]] = LABEL2ID["B-SPAN"]
-            for ti in token_indices[1:-1]:
-                labels[ti] = LABEL2ID["I-SPAN"]
-            labels[token_indices[-1]] = LABEL2ID["L-SPAN"]
+            raise ValueError(f"Unsupported label_scheme in preprocess: {label_scheme!r}")
 
     return input_ids, attention_mask, labels
 
+
+# Keep the old name as an alias so existing call-sites still work.
+def assign_bilou_labels(
+    text: str,
+    spans: list[dict[str, int]],
+    tokenizer,
+    max_seq_length: int,
+) -> tuple[list[int], list[int], list[int]]:
+    """Backward-compatible wrapper: always uses BILOU scheme."""
+    return assign_labels(text, spans, tokenizer, max_seq_length, label_scheme="BILOU")
+
+
+# ---------------------------------------------------------------------------
+# Unit → token example
+# ---------------------------------------------------------------------------
 
 def _unit_to_token_example(
     unit: dict,
     granularity: str,
     tokenizer,
     max_seq_length: int,
+    label_scheme: LabelScheme = "BILOU",
 ) -> dict[str, Any] | None:
-    """Convert unit to token-level example with BILOU labels (internal links only)."""
+    """Convert a ground-truth unit to a token-level example with scheme labels."""
     if granularity == "article":
         text = unit.get("article_plain_text", "")
     elif granularity == "paragraph":
@@ -106,16 +188,16 @@ def _unit_to_token_example(
     if not text.strip():
         return None
 
-    # Get spans from internal links only
     links = unit.get("links", [])
     use_char = granularity == "article"
     spans = _spans_from_links_internal_only(links, use_char_offsets=use_char)
 
-    input_ids, attention_mask, labels = assign_bilou_labels(
+    input_ids, attention_mask, label_ids = assign_labels(
         text=text,
         spans=spans,
         tokenizer=tokenizer,
         max_seq_length=max_seq_length,
+        label_scheme=label_scheme,
     )
 
     return {
@@ -123,9 +205,13 @@ def _unit_to_token_example(
         "text": text,
         "input_ids": input_ids,
         "attention_mask": attention_mask,
-        "label_ids": labels,
+        "label_ids": label_ids,
     }
 
+
+# ---------------------------------------------------------------------------
+# Dataset builder
+# ---------------------------------------------------------------------------
 
 def build_token_dataset(
     config: dict,
@@ -133,10 +219,15 @@ def build_token_dataset(
     granularity: str,
     model_name: str,
     seed: int | None = None,
+    label_scheme: LabelScheme = "BILOU",
 ) -> tuple[Path, Path, Path]:
     """
-    Build token-level BILOU train/dev/test JSONL (fandom style).
-    Uses internal links only, article-based splits, overlap logic.
+    Build token-level train/dev/test JSONL for a given label scheme.
+
+    Token data is stored under:
+      data/span_id/<domain>/token_data/<granularity>_<model>_<scheme>/
+
+    so that BIO and BILOU datasets coexist on disk without overwriting each other.
     Returns (train_path, dev_path, test_path).
     """
     log = logging.getLogger("span_id")
@@ -147,8 +238,8 @@ def build_token_dataset(
     max_seq_length = config.get("model", {}).get("max_length", 512)
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     log.info(
-        "[build_token_dataset] domain=%s granularity=%s model=%s",
-        domain, granularity, model_name,
+        "[build_token_dataset] domain=%s granularity=%s model=%s label_scheme=%s",
+        domain, granularity, model_name, label_scheme,
     )
 
     units = load_units(processed_path)
@@ -159,7 +250,7 @@ def build_token_dataset(
     def _convert(unit_list: list[dict]) -> list[dict]:
         out = []
         for u in unit_list:
-            ex = _unit_to_token_example(u, granularity, tokenizer, max_seq_length)
+            ex = _unit_to_token_example(u, granularity, tokenizer, max_seq_length, label_scheme)
             if ex is not None:
                 out.append(ex)
         return out
@@ -168,12 +259,12 @@ def build_token_dataset(
     val_ex = _convert(val_units)
     test_ex = _convert(test_units)
 
-    out_dir = get_token_data_path(config, domain, granularity, model_name).parent
-    out_dir.mkdir(parents=True, exist_ok=True)
+    train_path = get_token_data_path(config, domain, granularity, model_name, "train", label_scheme)
+    dev_path   = get_token_data_path(config, domain, granularity, model_name, "dev",   label_scheme)
+    test_path  = get_token_data_path(config, domain, granularity, model_name, "test",  label_scheme)
 
-    train_path = get_token_data_path(config, domain, granularity, model_name, "train")
-    dev_path = get_token_data_path(config, domain, granularity, model_name, "dev")
-    test_path = get_token_data_path(config, domain, granularity, model_name, "test")
+    out_dir = train_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     for path, examples in [(train_path, train_ex), (dev_path, val_ex), (test_path, test_ex)]:
         with open(path, "w", encoding="utf-8") as f:

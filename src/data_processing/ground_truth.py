@@ -156,56 +156,66 @@ def _extract_plain_text_and_links(
     return plain_text, links
 
 
+def _walk_paragraph_el(
+    el,
+    plain_parts: list[str],
+    links: list[dict],
+    offset_holder: list[int],
+    base_url: str,
+    base_netloc: str,
+    page_name_to_article_id: dict[str, int],
+) -> None:
+    """Recursively traverse a paragraph element, collecting plain text and links.
+
+    ``offset_holder`` is a one-element list used as a mutable integer so this
+    function can be defined at module level without ``nonlocal``.
+    """
+    if isinstance(el, NavigableString):
+        s = str(el)
+        plain_parts.append(s)
+        offset_holder[0] += len(s)
+        return
+    if el.name == "a":
+        href = el.get("href") or ""
+        anchor_text = el.get_text(strip=False)
+        link_type, target_page, aid = _classify_link(
+            href, base_netloc, page_name_to_article_id
+        )
+        resolved = _get_resolved_url(href, base_url)
+        start = offset_holder[0]
+        plain_parts.append(anchor_text)
+        offset_holder[0] += len(anchor_text)
+        links.append({
+            "anchor_text": anchor_text,
+            "plain_text_rel_char_start": start,
+            "plain_text_rel_char_end": offset_holder[0],
+            "link_type": link_type,
+            "target_page_name": target_page,
+            "article_id_of_internal_link": aid,
+            "resolved_url": resolved,
+        })
+        return
+    for c in el.children:
+        _walk_paragraph_el(c, plain_parts, links, offset_holder, base_url, base_netloc, page_name_to_article_id)
+
+
 def _extract_paragraphs_with_links(
     soup: BeautifulSoup,
     base_url: str,
     base_netloc: str,
     page_name_to_article_id: dict[str, int],
 ) -> list[tuple[str, list[dict]]]:
-    """
-    Extract each <p> as (text, links) with link offsets relative to paragraph.
-    """
+    """Extract each <p> as (text, links) with link offsets relative to paragraph."""
     content = soup.find("div", class_="mw-parser-output")
     if not content:
         return []
     result = []
     for p_el in content.find_all("p"):
-        plain_parts = []
-        links = []
-        offset = 0
-
-        def _walk(el) -> None:
-            nonlocal offset
-            if isinstance(el, NavigableString):
-                s = str(el)
-                plain_parts.append(s)
-                offset += len(s)
-                return
-            if el.name == "a":
-                href = el.get("href") or ""
-                anchor_text = el.get_text(strip=False)
-                link_type, target_page, aid = _classify_link(
-                    href, base_netloc, page_name_to_article_id
-                )
-                resolved = _get_resolved_url(href, base_url)
-                start = offset
-                plain_parts.append(anchor_text)
-                offset += len(anchor_text)
-                links.append({
-                    "anchor_text": anchor_text,
-                    "plain_text_rel_char_start": start,
-                    "plain_text_rel_char_end": offset,
-                    "link_type": link_type,
-                    "target_page_name": target_page,
-                    "article_id_of_internal_link": aid,
-                    "resolved_url": resolved,
-                })
-                return
-            for c in el.children:
-                _walk(c)
-
+        plain_parts: list[str] = []
+        links: list[dict] = []
+        offset_holder = [0]
         for c in p_el.children:
-            _walk(c)
+            _walk_paragraph_el(c, plain_parts, links, offset_holder, base_url, base_netloc, page_name_to_article_id)
         text = "".join(plain_parts).strip()
         if text:
             result.append((text, links))
@@ -243,13 +253,29 @@ def _extract_paragraphs_with_links(
 
 
 def _split_into_sentences(text: str) -> list[str]:
-    """Simple sentence splitter (handles common abbreviations)."""
+    """Split text into sentences using nltk's Punkt tokenizer.
+
+    Handles abbreviations (Mr., Dr., U.S.A.), ellipses, and other edge cases
+    that a simple regex splitter cannot. Falls back to the full text as a single
+    sentence if nltk is unavailable.
+    """
     text = text.strip()
     if not text:
         return []
-    pattern = r'(?<=[.!?])\s+(?=[A-Z])'
-    sentences = re.split(pattern, text)
-    return [s.strip() for s in sentences if s.strip()]
+    try:
+        import nltk
+        try:
+            sentences = nltk.sent_tokenize(text)
+        except LookupError:
+            nltk.download("punkt_tab", quiet=True)
+            sentences = nltk.sent_tokenize(text)
+        return [s.strip() for s in sentences if s.strip()]
+    except ImportError:
+        logger.warning("nltk not installed; falling back to regex sentence splitter. "
+                       "Install with: pip install nltk")
+        pattern = r'(?<=[.!?])\s+(?=[A-Z])'
+        sentences = re.split(pattern, text)
+        return [s.strip() for s in sentences if s.strip()]
 
 
 @dataclass

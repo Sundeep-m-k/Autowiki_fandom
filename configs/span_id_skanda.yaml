@@ -1,64 +1,13 @@
-# Span identification - Skanda (1× RTX A6000)
+# Span identification — Skanda (1× RTX A6000).
 # Run: python scripts/02_Span_identification/01_run_span_id_skanda.py
+# Inherits all defaults from span_id_base.yaml and overrides only what differs.
+base: "span_id_base.yaml"
 
-# Base paths (relative to project root)
-data_dir: "data"
-span_id_dir: "data/span_id"
-processed_dir: "data/processed"
-checkpoint_dir: "data/checkpoints"
-research_dir: "data/research"
-log_dir: "data/logs"
-splits_subdir: "splits"
-
-processed:
-  paragraphs_file: "paragraphs_{domain}.jsonl"
-  sentences_file: "sentences_{domain}.jsonl"
-  articles_file: "articles_page_granularity_{domain}.jsonl"
-
-split:
-  seed: 42
-  train_ratio: 0.7
-  val_ratio: 0.15
-  test_ratio: 0.15
-  split_by: "article_id"
-  recreate_if_exists: false
-
-# Skanda: 1 domain, 1 GPU
 domains: ["beverlyhillscop"]
-granularities: ["sentence", "paragraph", "article"]
-models: ["bert-base-uncased"]
-label_schemes: ["BIO", "BILOU"]
 
-training:
-  epochs: 20
-  learning_rate: 5.0e-5
-  batch_size: 32
-  weight_decay: 0.01
-  warmup_ratio: 0.1
-  max_grad_norm: 1.0
-
-optimizer: "adamw"
-scheduler: "linear"
-early_stopping:
-  enabled: true
-  patience: 3
-  min_delta: 0.001
-  metric: "val_span_f1"
-
-model:
-  max_length: 512
-  dropout: 0.1
-
-seeds: [42, 123, 456]
-fix_random_seeds: true
-
-checkpoint:
-  save_every_epoch: true
-  selection: ["best_val_f1", "last"]
-
-run_baselines: true
-baselines: ["rule_capitalized", "heuristic_anchor", "random"]
-data_fractions: [1.0]
-transfer_experiments: false
-metrics: ["span_f1", "token_f1", "exact_match_pct", "overlap_f1"]
-research_csv: "span_id_experiments.csv"
+models:
+  - "bert-base-uncased"
+  - "microsoft/deberta-v3-base"
+  - "SpanBERT/spanbert-base-cased"
+  - "roberta-base"
+  - "distilbert-base-uncased"

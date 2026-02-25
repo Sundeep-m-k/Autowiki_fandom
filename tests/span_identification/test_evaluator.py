@@ -3,7 +3,7 @@ import pytest
 
 from src.span_identification.evaluator import (
     span_f1,
-    token_f1,
+    char_f1,
     exact_match_pct,
     overlap_f1,
     evaluate_example,
@@ -37,10 +37,10 @@ def test_span_f1_empty_gold():
     assert p == 0.0
 
 
-def test_token_f1():
+def test_char_f1():
     gold = [(0, 5)]
     pred = [(0, 3)]
-    p, r, f = token_f1(gold, pred, text_length=50)
+    p, r, f = char_f1(gold, pred, text_length=50)
     assert p > 0
     assert r > 0
 

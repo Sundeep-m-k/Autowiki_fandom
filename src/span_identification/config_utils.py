@@ -5,10 +5,35 @@ from typing import Any
 import yaml
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base, returning a new dict."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
-    """Load YAML config file."""
+    """Load YAML config file.
+
+    If the config contains a ``base:`` key pointing to another YAML file,
+    that file is loaded first and the current config is deep-merged on top,
+    so only the keys that differ need to be specified in the override config.
+    The ``base:`` key is resolved relative to the config file's directory.
+    """
+    path = Path(path)
     with open(path) as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f) or {}
+    base_ref = cfg.pop("base", None)
+    if base_ref:
+        base_path = path.parent / base_ref
+        with open(base_path) as f:
+            base_cfg = yaml.safe_load(f) or {}
+        cfg = _deep_merge(base_cfg, cfg)
+    return cfg
 
 
 def get_processed_path(config: dict, domain: str, granularity: str) -> Path:
@@ -38,11 +63,21 @@ def get_split_path(config: dict, domain: str, granularity: str, split: str) -> P
     return root / f"{split}_{granularity}.jsonl"
 
 
-def get_token_data_dir(config: dict, domain: str, granularity: str, model_name: str) -> Path:
-    """Token-level dataset dir: span_id/<domain>/token_data/<granularity>_<model>/"""
+def get_token_data_dir(
+    config: dict,
+    domain: str,
+    granularity: str,
+    model_name: str,
+    label_scheme: str = "BILOU",
+) -> Path:
+    """Token-level dataset dir: span_id/<domain>/token_data/<granularity>_<model>_<scheme>/
+
+    The label scheme is included in the directory name so that BIO and BILOU
+    datasets can coexist on disk without overwriting each other.
+    """
     span_id_base = Path(config.get("span_id_dir", "data/span_id"))
     model_suffix = model_name.replace("/", "_")
-    return span_id_base / domain / "token_data" / f"{granularity}_{model_suffix}"
+    return span_id_base / domain / "token_data" / f"{granularity}_{model_suffix}_{label_scheme}"
 
 
 def get_token_data_path(
@@ -51,9 +86,10 @@ def get_token_data_path(
     granularity: str,
     model_name: str,
     split: str = "train",
+    label_scheme: str = "BILOU",
 ) -> Path:
     """Path to token-level JSONL: train.jsonl, dev.jsonl, test.jsonl."""
-    base = get_token_data_dir(config, domain, granularity, model_name)
+    base = get_token_data_dir(config, domain, granularity, model_name, label_scheme)
     return base / f"{split}.jsonl"
 
 

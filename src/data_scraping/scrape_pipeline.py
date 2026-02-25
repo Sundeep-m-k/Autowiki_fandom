@@ -409,9 +409,10 @@ def fetch_page_via_api(base_url: str, url: str, session: requests.Session, timeo
 
 
 def fetch_html(session: requests.Session, url: str, timeout: int = 20) -> str:
-    resp = session.get(url, timeout=timeout)
+    resp = session.get(url, timeout=timeout, allow_redirects=True)
     resp.raise_for_status()
-    return resp.text
+    # Return both the HTML and the final URL after redirects
+    return resp.text, resp.url
 
 
 def fetch_html_or_api(
@@ -425,22 +426,43 @@ def fetch_html_or_api(
     Fetch page HTML. On 403, fall back to MediaWiki parse API if use_api_fallback.
     """
     try:
-        return fetch_html(session, url, timeout=timeout)
+        html, final_url = fetch_html(session, url, timeout=timeout)
+        return html, final_url
     except requests.HTTPError as e:
         if use_api_fallback and e.response is not None and e.response.status_code == 403:
             logger.info(f"    403 on HTML fetch, trying MediaWiki API for {url}")
-            return fetch_page_via_api(base_url, url, session, timeout=timeout)
+            html = fetch_page_via_api(base_url, url, session, timeout=timeout)
+            return html, url  # API fallback, use original URL
         raise
 
 
 def extract_article_id(html: str) -> Optional[str]:
-    m = re.search(r'wgArticleId"\s*:\s*(\d+)', html)
-    if m:
-        return m.group(1)
-    m = re.search(r"\bwgArticleId\s*=\s*(\d+)", html)
-    if m:
-        return m.group(1)
+    # Try to match various patterns for article ID in JS/JSON
+    patterns = [
+        # Matches: "wgArticleId": 12345, 'wgArticleId': 12345, "wgArticleId" : "12345", etc.
+        r'["\']wgArticleId["\']\s*:\s*["\']?(\d+)["\']?',
+        r'["\']wgRelevantArticleId["\']\s*:\s*["\']?(\d+)["\']?',
+        # Matches: wgArticleId = 12345;
+        r'wgArticleId\s*=\s*["\']?(\d+)["\']?',
+        r'wgRelevantArticleId\s*=\s*["\']?(\d+)["\']?',
+    ]
+    for pat in patterns:
+        m = re.search(pat, html)
+        if m:
+            return m.group(1)
 
+    # Try to parse RLCONF or similar JS objects
+    m = re.search(r'RLCONF\s*=\s*\{([^}]+)\}', html)
+    if m:
+        conf = m.group(1)
+        m2 = re.search(r'wgArticleId"\s*:\s*(\d+)', conf)
+        if m2:
+            return m2.group(1)
+        m2 = re.search(r'wgRelevantArticleId"\s*:\s*(\d+)', conf)
+        if m2:
+            return m2.group(1)
+
+    # Fallback to meta tags
     soup = BeautifulSoup(html, "html.parser")
     meta = soup.find("meta", {"property": "mw:pageId"})
     if meta and meta.get("content") and str(meta["content"]).isdigit():
@@ -482,26 +504,35 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
     max_html_bytes = 0
     max_text_bytes = 0
 
+    # Optional: Save mapping from original URL to final URL
+    url_mapping = []
+
     for i, url in enumerate(urls, start=1):
         logger.info(f"[{i}/{total}] Fetching → {url}")
         ok = False
 
         for attempt in range(1, 4):
             try:
-                html = fetch_html_or_api(
+                html, final_url = fetch_html_or_api(
                     session, url, base_url,
                     use_api_fallback=cfg.use_api_fallback,
                 )
 
-                article_id = extract_article_id(html)
-                if article_id:
-                    fname = f"{article_id}.html"
-                else:
-                    fname = safe_filename_from_url(url)
-                    logger.warning(
-                        f"    Could not extract article ID; using URL filename: {fname}"
-                    )
+                # Save mapping for traceability
+                if url != final_url:
+                    logger.info(f"    Redirected to final URL: {final_url}")
+                url_mapping.append((url, final_url))
 
+
+                # Only save if article ID is found
+                article_id = extract_article_id(html)
+                if not article_id:
+                    logger.warning(f"    Could not extract article ID; skipping page (final URL: {final_url})")
+                    skipped += 1
+                    ok = True
+                    break
+
+                fname = f"{article_id}.html"
                 out_path = output_dir / fname
 
                 if out_path.exists():
@@ -552,6 +583,14 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
             )
 
         time.sleep(cfg.delay_seconds)
+
+    # Optionally, write mapping to file for traceability
+    mapping_path = output_dir / "url_redirect_mapping.tsv"
+    with open(mapping_path, "w", encoding="utf-8") as f:
+        f.write("original_url\tfinal_url\n")
+        for orig, final in url_mapping:
+            f.write(f"{orig}\t{final}\n")
+    logger.info(f"Saved URL redirect mapping to {mapping_path}")
 
     logger.info("=== Scrape summary ===")
     logger.info(f"Total URLs:    {total}")

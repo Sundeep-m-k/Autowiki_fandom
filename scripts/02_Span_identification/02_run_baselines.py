@@ -26,18 +26,18 @@ def main():
     research_csv = get_research_csv_path(config)
     research_csv.parent.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_exists = research_csv.exists()
     fieldnames = [
         "run_id", "timestamp", "seed", "experiment_type",
         "granularity", "domain", "model", "label_scheme", "data_fraction",
         "train_size", "val_size", "span_f1", "span_precision", "span_recall",
-        "token_f1", "exact_match_pct", "wall_time_sec", "checkpoint_path", "notes",
+        "char_f1", "exact_match_pct", "wall_time_sec", "checkpoint_path", "notes",
     ]
 
     def append_row(row):
+        write_header = not research_csv.exists() or research_csv.stat().st_size == 0
         with open(research_csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            if not csv_exists:
+            if write_header:
                 w.writeheader()
             w.writerow(row)
 
@@ -76,7 +76,7 @@ def main():
                     "span_f1": m.get("span_f1", 0),
                     "span_precision": m.get("span_precision", 0),
                     "span_recall": m.get("span_recall", 0),
-                    "token_f1": m.get("token_f1", 0),
+                    "char_f1": m.get("char_f1", 0),
                     "exact_match_pct": m.get("exact_match_pct", 0),
                     "wall_time_sec": 0,
                     "checkpoint_path": "",

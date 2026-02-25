@@ -1,0 +1,10 @@
+# Article Retrieval — Kudremukh (4× RTX 6000 Ada).
+# Run: python scripts/03_Article_retrieval/run_all.py --config configs/article_retrieval_kudremukh.yaml
+# Inherits all defaults from article_retrieval_base.yaml.
+base: "article_retrieval_base.yaml"
+
+domains: ["money-heist", "beverlyhillscop"]
+
+parallel:
+  n_workers: 8                                # more workers on multi-GPU machine
+  embedding_batch_size: 128                   # larger batch fits in GPU memory
