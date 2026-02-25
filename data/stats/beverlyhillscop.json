@@ -1,54 +1,54 @@
 {
   "domain": "beverlyhillscop",
-  "updated_at": "2026-02-23T03:45:38.019470",
+  "updated_at": "2026-02-25T07:14:08.896650",
   "scraping": {
     "total_urls": 139,
-    "downloaded": 0,
-    "skipped": 139,
+    "downloaded": 129,
+    "skipped": 10,
     "failed": 0,
     "html_bytes": {
-      "total": 0,
-      "avg": 0,
-      "max": 0
+      "total": 26825439,
+      "avg": 207949.13953488372,
+      "max": 320187
     },
     "text_bytes": {
-      "total": 0,
-      "avg": 0,
-      "max": 0
+      "total": 375077,
+      "avg": 2907.5736434108526,
+      "max": 42415
     }
   },
-  "previous_runs": [
-    {
-      "updated_at": "2026-02-23T03:44:39.596966",
-      "scraping": {
-        "total_urls": 139,
-        "downloaded": 129,
-        "skipped": 10,
-        "failed": 0,
-        "html_bytes": {
-          "total": 26649202,
-          "avg": 206582.96124031008,
-          "max": 318823
-        },
-        "text_bytes": {
-          "total": 375077,
-          "avg": 2907.5736434108526,
-          "max": 42415
-        }
-      }
-    }
-  ],
   "dataset_stats": {
     "num_articles": 129,
-    "num_paragraphs": 1274,
-    "num_sentences": 3441,
-    "num_links": 2448,
+    "num_paragraphs": 855,
+    "num_sentences": 3064,
+    "num_links": 1773,
     "link_type_counts": {
-      "internal": 961,
-      "external": 32,
-      "category": 0,
-      "file": 0,
-      "other": 231
-    }
+      "internal": 974,
+      "other": 673,
+      "file": 117,
+      "external": 9
+    },
+    "avg_article_length_chars": 3702,
+    "max_article_length_chars": 43149,
+    "avg_internal_links_per_article": 7.55,
+    "num_articles_with_no_internal_links": 3,
+    "split_sizes": {
+      "sentence": {
+        "train": 1874,
+        "val": 742,
+        "test": 448
+      },
+      "paragraph": {
+        "train": 572,
+        "val": 157,
+        "test": 126
+      },
+      "article": {
+        "train": 90,
+        "val": 19,
+        "test": 20
+      }
+    },
+    "updated_at": "2026-02-25T07:36:19.242547"
   }
 }

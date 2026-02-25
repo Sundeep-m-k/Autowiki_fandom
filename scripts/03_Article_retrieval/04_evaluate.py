@@ -28,6 +28,11 @@ from article_retrieval.reranker import load_reranking_results
 from article_retrieval.evaluator import compute_metrics, save_metrics_json, append_to_research_csv
 from article_retrieval.logging_utils import setup_logger
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from src.utils.stats_utils import update_article_retrieval_stats
+
 log = logging.getLogger("article_retrieval")
 
 
@@ -157,8 +162,10 @@ def main() -> None:
 
     stages = ["retrieval", "reranking"] if args.stage == "all" else [args.stage]
 
+    csv_path = cu.get_research_csv_path(config)
     for domain in domains:
         evaluate_for_domain(config, domain, retrievers, versions, stages, force=args.force)
+        update_article_retrieval_stats(domain, csv_path)
 
 
 if __name__ == "__main__":

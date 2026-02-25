@@ -3,7 +3,8 @@
 For each article in the Task 1 test split:
   1. Load gold spans (anchor_text, char_start, char_end, gold_article_id)
   2. For each span, look up the top-1 retrieved article from Task 2 results
-     using key (source_article_id, anchor_text)
+     using key (source_article_id, char_start, char_end) — falls back to
+     (source_article_id, anchor_text) for legacy query datasets
   3. Apply NIL threshold — set linked=False if score < threshold
   4. Look up page_name from article index for URL construction
   5. Save linking results JSONL (one record per article)
@@ -106,7 +107,13 @@ def run_for_domain(config: dict, domain: str, force: bool) -> None:
 
         for span in article["gold_spans"]:
             n_spans_total += 1
-            hit = lookup_span(lookup, article_id, span["anchor_text"])
+            hit = lookup_span(
+                lookup,
+                article_id,
+                span["anchor_text"],
+                char_start=span.get("char_start"),
+                char_end=span.get("char_end"),
+            )
 
             if hit is None:
                 # No Task 2 result for this (article_id, anchor) pair

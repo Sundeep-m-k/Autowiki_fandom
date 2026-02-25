@@ -32,6 +32,7 @@ Pipeline steps:
 from __future__ import annotations
 
 import argparse
+import socket
 import subprocess
 import sys
 import time
@@ -41,6 +42,15 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = Path(__file__).parent
 
 PYTHON = sys.executable
+
+# Auto-select config based on hostname; can always be overridden with --config.
+_HOSTNAME_CONFIG: dict[str, str] = {
+    "kudremukh": "configs/article_retrieval_kudremukh.yaml",
+}
+_DEFAULT_CONFIG = _HOSTNAME_CONFIG.get(
+    socket.gethostname().lower(),
+    "configs/article_retrieval_base.yaml",
+)
 
 
 def run_step(script: str, extra_args: list[str], step_name: str) -> None:
@@ -60,7 +70,8 @@ def run_step(script: str, extra_args: list[str], step_name: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run full article retrieval pipeline.")
-    parser.add_argument("--config", default="configs/article_retrieval.yaml")
+    parser.add_argument("--config", default=_DEFAULT_CONFIG,
+                        help=f"Config file (auto-detected: {_DEFAULT_CONFIG}).")
     parser.add_argument("--domain", help="Single domain override.")
     parser.add_argument("--retriever", help="Comma-separated retriever names.")
     parser.add_argument("--versions", help="Comma-separated version numbers.")
@@ -91,7 +102,8 @@ def main() -> None:
         eval_extra += ["--stage", args.stage]
 
     t_start = time.time()
-    print(f"\nArticle Retrieval Pipeline — config: {args.config}")
+    auto = " (auto-detected)" if args.config == _DEFAULT_CONFIG else " (user-supplied)"
+    print(f"\nArticle Retrieval Pipeline — config: {args.config}{auto}")
     print(f"domain={'(all)' if not args.domain else args.domain}  "
           f"force={args.force}  stage={args.stage}")
 

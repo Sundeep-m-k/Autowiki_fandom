@@ -6,3 +6,5 @@ seqeval
 pyyaml>=6.0
 nltk
 numpy
+protobuf
+sentencepiece

@@ -33,6 +33,11 @@ from linking_pipeline.evaluator import (
     append_to_research_csv,
 )
 
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[2]))
+from src.utils.stats_utils import update_linking_stats
+
 log = logging.getLogger("linking")
 
 
@@ -92,8 +97,10 @@ def main() -> None:
     config  = cu.load_config(ROOT / args.config)
     domains = [args.domain] if args.domain else config.get("domains", [])
 
+    csv_path = cu.get_research_csv_path(config)
     for domain in domains:
         run_for_domain(config, domain, force=args.force)
+        update_linking_stats(domain, csv_path)
 
 
 if __name__ == "__main__":

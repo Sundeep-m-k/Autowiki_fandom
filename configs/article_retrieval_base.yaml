@@ -88,7 +88,7 @@ retrievers:
     - "bm25"
     - "tfidf"
   dense:
-    # - "sentence-transformers/all-mpnet-base-v2"
+    - "sentence-transformers/all-mpnet-base-v2"
     - "sentence-transformers/all-MiniLM-L6-v2"
     - "sentence-transformers/msmarco-distilbert-base-v4"
     - "roberta-base"

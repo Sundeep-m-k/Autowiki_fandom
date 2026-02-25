@@ -183,7 +183,7 @@ def main() -> None:
     config   = cu.load_config(ROOT / args.config)
     csv_path = cu.get_research_csv_path(config)
     domain   = args.domain or config.get("domains", [None])[0]
-    out_dir  = Path(config.get("linking_dir", "data/linking")) / "plots"
+    out_dir  = Path(config.get("linking_dir", "data/linking")) / domain / "plots"
     show     = not args.no_show
 
     df = load_data(csv_path, domain)

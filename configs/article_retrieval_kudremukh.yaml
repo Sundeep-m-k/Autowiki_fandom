@@ -1,10 +1,20 @@
-# Article Retrieval — Kudremukh (4× RTX 6000 Ada).
+# Article Retrieval — Kudremukh (4× RTX 6000 Ada, 47 GB VRAM each, 112 cores, 1 TB RAM).
 # Run: python scripts/03_Article_retrieval/run_all.py --config configs/article_retrieval_kudremukh.yaml
 # Inherits all defaults from article_retrieval_base.yaml.
 base: "article_retrieval_base.yaml"
 
-domains: ["money-heist", "beverlyhillscop"]
+domains: ["beverlyhillscop"]
 
 parallel:
-  n_workers: 8                                # more workers on multi-GPU machine
-  embedding_batch_size: 128                   # larger batch fits in GPU memory
+  n_workers: 16                               # 16 workers — 1 per physical core group
+  embedding_batch_size: 512                   # RTX 6000 Ada (47 GB) handles 512 comfortably
+                                              # for standard ST models (768-dim, seq_len=512)
+                                              # all-mpnet / MiniLM / msmarco-distilbert all fit
+
+# Reranking batch is controlled by sentence-transformers CrossEncoder internally.
+# The cross-encoder is now loaded ONCE and all (retriever × version) jobs are
+# processed in a single session — no per-version model reload overhead.
+reranking:
+  enabled: true
+  model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  top_k_input: 20

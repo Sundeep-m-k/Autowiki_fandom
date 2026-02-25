@@ -22,6 +22,7 @@ for p in (_PROJECT_ROOT, _SRC):
 
 from src.data_processing.ground_truth import GroundTruthConfig, run_ground_truth_build
 from src.utils.logging_utils import create_logger, get_log_dir
+from src.utils.stats_utils import update_dataset_stats
 
 
 def main() -> None:
@@ -75,6 +76,58 @@ def main() -> None:
         if p.exists():
             logger.info("%s: %s", k, p)
     logger.info("Log file: %s", log_path)
+
+    # ── Compute and persist dataset stats ─────────────────────────────────────
+    import json as _json
+
+    def _count_jsonl(path) -> int:
+        if not path.exists():
+            return 0
+        return sum(1 for line in open(path, encoding="utf-8") if line.strip())
+
+    art_pg_path = result_paths.get(
+        "articles_page_granularity_jsonl",
+        config.processed_dir / domain / f"articles_page_granularity_{domain}.jsonl",
+    )
+    para_path = result_paths.get(
+        "paragraphs_jsonl",
+        config.processed_dir / domain / f"paragraphs_{domain}.jsonl",
+    )
+    sent_path = result_paths.get(
+        "sentences_jsonl",
+        config.processed_dir / domain / f"sentences_{domain}.jsonl",
+    )
+
+    link_type_counts: dict[str, int] = {}
+    num_links = 0
+    if art_pg_path.exists():
+        with open(art_pg_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = _json.loads(line)
+                for lk in rec.get("links", []):
+                    lt = lk.get("link_type", "other")
+                    link_type_counts[lt] = link_type_counts.get(lt, 0) + 1
+                    num_links += 1
+
+    dataset_stats = {
+        "num_articles":    _count_jsonl(art_pg_path),
+        "num_paragraphs":  _count_jsonl(para_path),
+        "num_sentences":   _count_jsonl(sent_path),
+        "num_links":       num_links,
+        "link_type_counts": link_type_counts,
+    }
+    update_dataset_stats(domain, dataset_stats)
+    logger.info(
+        "dataset_stats: articles=%d paragraphs=%d sentences=%d links=%d (internal=%d)",
+        dataset_stats["num_articles"],
+        dataset_stats["num_paragraphs"],
+        dataset_stats["num_sentences"],
+        dataset_stats["num_links"],
+        dataset_stats["link_type_counts"].get("internal", 0),
+    )
 
     print(f"Paragraph master file: {result_paths.get('paragraphs_jsonl', 'N/A')}")
     print(f"Log file: {log_path}")

@@ -242,6 +242,8 @@ def build_query_dataset(
                     "gold_article_id": int(gold_article_id),
                     "source_article_id": article_id,
                     "paragraph_text": paragraph_text,
+                    "char_start": link.get("plain_text_char_start"),
+                    "char_end":   link.get("plain_text_char_end"),
                 })
 
     log.info(
@@ -274,6 +276,8 @@ def build_query_dataset(
             "gold_article_id":  link["gold_article_id"],
             "source_article_id": link["source_article_id"],
             "paragraph_text":   link["paragraph_text"],
+            "char_start":       link.get("char_start"),
+            "char_end":         link.get("char_end"),
             "queries":          queries,
         })
 

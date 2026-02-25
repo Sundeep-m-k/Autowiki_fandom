@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import article_retrieval.config_utils as cu
 from article_retrieval.retriever import load_retrieval_results
-from article_retrieval.reranker import rerank, save_reranking_results, build_article_lookup
+from article_retrieval.reranker import rerank_all_versions, save_reranking_results, build_article_lookup
 from article_retrieval.query_builder import load_query_dataset
 from article_retrieval.logging_utils import setup_logger
 
@@ -48,6 +48,7 @@ def run_for_domain(
 
     reranker_name = reranking_cfg.get("model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
     top_k_input   = reranking_cfg.get("top_k_input", 20)
+    top_k         = config.get("retrieval", {}).get("top_k", 100)
 
     # Load article text lookup for cross-encoder scoring
     articles_path = cu.get_articles_jsonl_path(config, domain)
@@ -65,29 +66,24 @@ def run_for_domain(
     query_records = load_query_dataset(query_path)
     query_by_id   = {r["query_id"]: r for r in query_records}
 
-    for retriever in retrievers:
-        for version in versions:
-            out_path = cu.get_reranking_path(config, domain, retriever, reranker_name, version)
-            if out_path.exists() and not force:
-                log.info("[03] skip (cached): %s", out_path)
-                continue
+    log.info(
+        "[03] reranking %d retrievers × %d versions with model=%s "
+        "(cross-encoder loaded ONCE for all jobs)",
+        len(retrievers), len(versions), reranker_name,
+    )
 
-            top_k = config.get("retrieval", {}).get("top_k", 100)
-            ret_path = cu.get_retrieval_path(config, domain, retriever, version, top_k)
-            if not ret_path.exists():
-                log.warning("[03] retrieval results not found: %s — skipping", ret_path)
-                continue
-
-            retrieval_results = load_retrieval_results(ret_path)
-            reranked = rerank(
-                retrieval_results=retrieval_results,
-                article_lookup=article_lookup,
-                model_name=reranker_name,
-                top_k_input=top_k_input,
-                version=version,
-                query_records_by_id=query_by_id,
-            )
-            save_reranking_results(reranked, out_path)
+    # Load the cross-encoder once and process all (retriever × version) jobs
+    rerank_all_versions(
+        retrievers=retrievers,
+        versions=versions,
+        article_lookup=article_lookup,
+        model_name=reranker_name,
+        top_k_input=top_k_input,
+        query_records_by_id=query_by_id,
+        get_ret_path_fn=lambda r, v: cu.get_retrieval_path(config, domain, r, v, top_k),
+        get_out_path_fn=lambda r, v: cu.get_reranking_path(config, domain, r, reranker_name, v),
+        force=force,
+    )
 
 
 def main() -> None:

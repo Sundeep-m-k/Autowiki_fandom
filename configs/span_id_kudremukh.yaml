@@ -4,7 +4,7 @@
 # Inherits all defaults from span_id_base.yaml and overrides only what differs.
 base: "span_id_base.yaml"
 
-domains: ["money-heist"]
+domains: ["beverlyhillscop"]
 
 models:
   - "bert-base-uncased"

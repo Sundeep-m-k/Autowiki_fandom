@@ -307,7 +307,7 @@ def main() -> None:
     config   = cu.load_config(ROOT / args.config)
     csv_path = cu.get_research_csv_path(config)
     domain   = args.domain or config.get("domains", [None])[0]
-    out_dir  = Path(config.get("article_retrieval_dir", "data/article_retrieval")) / "plots"
+    out_dir  = Path(config.get("article_retrieval_dir", "data/article_retrieval")) / domain / "plots"
     show     = not args.no_show
 
     print(f"\nLoading results: {csv_path}")

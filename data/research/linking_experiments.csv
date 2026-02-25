@@ -1,5 +1,0 @@
-timestamp,domain,retriever,reranker,stage,query_version,nil_threshold,n_articles,n_gold_total,n_pred_total,linking_precision,linking_recall,linking_f1,span_precision,span_recall,span_f1,entity_accuracy,nil_rate,coverage,notes
-2026-02-25 06:34:55,beverlyhillscop,sentence-transformers/msmarco-distilbert-base-v4,cross-encoder/ms-marco-MiniLM-L-6-v2,reranking,6,0.0,20,141,114,0.6627,0.5876,0.6181,1.0,0.8741,0.9235,0.6627,0.1259,1.0,
-2026-02-25 06:35:52,beverlyhillscop,sentence-transformers/msmarco-distilbert-base-v4,cross-encoder/ms-marco-MiniLM-L-6-v2,reranking,6,0.1,20,141,113,0.6623,0.5855,0.6165,1.0,0.8719,0.922,0.6623,0.1281,1.0,
-2026-02-25 06:35:52,beverlyhillscop,sentence-transformers/msmarco-distilbert-base-v4,cross-encoder/ms-marco-MiniLM-L-6-v2,reranking,6,0.2,20,141,113,0.6623,0.5855,0.6165,1.0,0.8719,0.922,0.6623,0.1281,1.0,
-2026-02-25 06:35:53,beverlyhillscop,sentence-transformers/msmarco-distilbert-base-v4,cross-encoder/ms-marco-MiniLM-L-6-v2,reranking,6,0.5,20,141,113,0.6623,0.5855,0.6165,1.0,0.8719,0.922,0.6623,0.1281,1.0,

@@ -1,1 +1,0 @@
-domain,granularity,model,data_fraction,n_seeds,run_id,val_span_f1,val_span_f1_std,span_f1,span_f1_std,span_precision,span_precision_std,span_recall,span_recall_std,token_f1,token_f1_std,exact_match_pct,exact_match_pct_std,wall_time_sec,wall_time_sec_std,train_size,val_size

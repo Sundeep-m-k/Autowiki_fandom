@@ -1,5 +1,0 @@
-{
-  "model": "SpanBERT/spanbert-base-cased",
-  "n_articles": 129,
-  "index_type": "flat"
-}

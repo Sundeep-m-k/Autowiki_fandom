@@ -6,7 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit, urlunsplit, unquote, urlparse
 
 import requests
@@ -16,18 +16,21 @@ import yaml
 from utils.stats_utils import update_scraping_stats
 
 logger = logging.getLogger()
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------- CONFIG ----------------------
 
-
-# Browser-like headers to reduce 403 blocks from Fandom/CDN
+# NOTE:
+# - Removed "br" from Accept-Encoding to avoid Brotli decode issues if brotli isn't installed.
+# - Kept browser-ish headers to reduce 403s.
 BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+    ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "gzip, deflate",
     "DNT": "1",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
@@ -36,6 +39,8 @@ BROWSER_HEADERS = {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
 }
+
+DEFAULT_TIMEOUT = 30
 
 
 @dataclass
@@ -52,10 +57,6 @@ class ScrapingConfig:
 
 
 def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
-    """
-    Load configs/scraping.yaml from project root unless overridden.
-    Validates base_url and start_url format.
-    """
     if config_path is None:
         config_path = PROJECT_ROOT / "configs" / "scraping.yaml"
 
@@ -75,9 +76,7 @@ def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
 
     base_url = str(cfg["base_url"]).strip().rstrip("/")
     if not base_url.startswith(("http://", "https://")):
-        raise ValueError(
-            f"base_url must be a valid HTTP(S) URL, got: {base_url!r}"
-        )
+        raise ValueError(f"base_url must be a valid HTTP(S) URL, got: {base_url!r}")
     parsed = urlparse(base_url)
     if not parsed.netloc or "." not in parsed.netloc:
         raise ValueError(
@@ -94,14 +93,13 @@ def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
 
     category_urls = cfg.get("category_urls") or []
     if not isinstance(category_urls, list):
-        raise ValueError(
-            f"category_urls must be a list, got {type(category_urls).__name__}"
-        )
+        raise ValueError(f"category_urls must be a list, got {type(category_urls).__name__}")
     category_urls = [str(u).strip() for u in category_urls if u]
 
     delay_seconds = float(cfg.get("delay_seconds", 2.0))
     if delay_seconds < 0.5:
         delay_seconds = 0.5
+
     use_api_fallback = bool(cfg.get("use_api_fallback", True))
 
     return ScrapingConfig(
@@ -115,10 +113,10 @@ def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
 
 # ---------------------- URL GENERATION ----------------------
 
-
 def normalize_url(url: str) -> str:
     parts = urlsplit(url)
     path = unquote(parts.path).replace(" ", "_")
+    # strip query/fragment (MediaWiki pages often add noise params)
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 
@@ -143,8 +141,54 @@ def filter_article(url: str) -> bool:
     return not any(page.startswith(p) for p in skip_prefixes)
 
 
+def _page_title_from_url(url: str) -> str:
+    """Extract MediaWiki page title from wiki URL (part after /wiki/)."""
+    if "/wiki/" not in url:
+        return ""
+    return unquote(url.split("/wiki/", 1)[1])
+
+
+def _api_url(base_url: str) -> str:
+    return urljoin(base_url.rstrip("/") + "/", "api.php")
+
+
+def get_page_id_via_api(
+    base_url: str,
+    title: str,
+    session: requests.Session,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Optional[str]:
+    """
+    Reliable way to get a page/article id (pageid) on MediaWiki/Fandom.
+
+    Uses:
+      action=query&titles=...&prop=info&redirects=1
+    """
+    if not title:
+        return None
+
+    api = _api_url(base_url)
+    params = {
+        "action": "query",
+        "format": "json",
+        "prop": "info",
+        "redirects": "1",
+        "titles": title,
+    }
+    r = session.get(api, params=params, timeout=timeout)
+    r.raise_for_status()
+    data = r.json()
+    pages = (data.get("query", {}) or {}).get("pages", {}) or {}
+    for _, page in pages.items():
+        # missing pages have "missing": "" and no pageid
+        pageid = page.get("pageid")
+        if pageid is not None:
+            return str(pageid)
+    return None
+
+
 def scrape_allpages_api(base_url: str, session: requests.Session, delay: float = 0.1) -> List[str]:
-    api_url = urljoin(base_url, "/api.php")
+    api_url = _api_url(base_url)
     results: List[str] = []
     seen = set()
     params: Dict[str, str] = {
@@ -156,7 +200,7 @@ def scrape_allpages_api(base_url: str, session: requests.Session, delay: float =
 
     while True:
         logger.info(f"[AllPages API] Fetching {api_url} with params={params}")
-        r = session.get(api_url, params=params, timeout=30)
+        r = session.get(api_url, params=params, timeout=DEFAULT_TIMEOUT)
         r.raise_for_status()
         data = r.json()
 
@@ -189,7 +233,7 @@ def scrape_allpages(base_url: str, start_url: str, session: requests.Session, de
     while url:
         logger.info(f"[AllPages] Fetching {url}")
         try:
-            r = session.get(url, timeout=30)
+            r = session.get(url, timeout=DEFAULT_TIMEOUT)
             r.raise_for_status()
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else None
@@ -197,6 +241,7 @@ def scrape_allpages(base_url: str, start_url: str, session: requests.Session, de
                 logger.warning("[AllPages] 403 Forbidden, switching to API fallback.")
                 return scrape_allpages_api(base_url, session)
             raise
+
         soup = BeautifulSoup(r.text, "html.parser")
 
         for a in soup.select(".mw-allpages-chunk li > a, .mw-allpages-group li > a"):
@@ -237,32 +282,55 @@ def scrape_allpages(base_url: str, start_url: str, session: requests.Session, de
     return results
 
 
-def scrape_category(base_url: str, category_url: str, session: requests.Session) -> List[str]:
-    logger.info(f"[Category] Fetching {category_url}")
-    r = session.get(category_url, timeout=30)
-    r.raise_for_status()
-    soup = BeautifulSoup(r.text, "html.parser")
+def scrape_category_paginated(base_url: str, category_url: str, session: requests.Session) -> List[str]:
+    """
+    Fandom categories are often paginated. This follows "next" until done.
+    """
+    collected: List[str] = []
+    seen_pages = set()
+    url = category_url
 
-    urls: List[str] = []
-    selectors = [
-        "a.category-page__member-link",
-        ".category-page__members a",
-        ".category-page__content a",
-    ]
+    while url and url not in seen_pages:
+        seen_pages.add(url)
+        logger.info(f"[Category] Fetching {url}")
+        r = session.get(url, timeout=DEFAULT_TIMEOUT)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
 
-    for sel in selectors:
-        for a in soup.select(sel):
-            href = a.get("href")
-            if not href:
-                continue
-            if href.startswith("/"):
-                full = normalize_url(base_url.rstrip("/") + href)
-            else:
-                full = normalize_url(href)
-            urls.append(full)
+        selectors = [
+            "a.category-page__member-link",
+            ".category-page__members a",
+            ".category-page__content a",
+        ]
 
-    logger.info(f"[Category] Found {len(urls)} URLs in {category_url}")
-    return urls
+        for sel in selectors:
+            for a in soup.select(sel):
+                href = a.get("href")
+                if not href:
+                    continue
+                if href.startswith("/"):
+                    full = normalize_url(base_url.rstrip("/") + href)
+                else:
+                    full = normalize_url(href)
+                collected.append(full)
+
+        # find next page
+        next_url = None
+        # common fandom next button
+        a_next = soup.select_one("a.category-page__pagination-next, a.category-page__pagination-next-button")
+        if a_next and a_next.get("href"):
+            next_url = a_next.get("href")
+
+        if not next_url:
+            # sometimes generic "next" rel link
+            head_next = soup.find("link", rel=lambda v: v and "next" in v.lower() if v else False)
+            if head_next and head_next.get("href"):
+                next_url = head_next.get("href")
+
+        url = urljoin(base_url, next_url) if next_url else None
+
+    logger.info(f"[Category] Found {len(collected)} URLs (including pagination) from {category_url}")
+    return collected
 
 
 def scrape_all_categories(base_url: str, category_urls: List[str], session: requests.Session) -> List[str]:
@@ -273,7 +341,7 @@ def scrape_all_categories(base_url: str, category_urls: List[str], session: requ
     collected: List[str] = []
     for cu in category_urls:
         try:
-            collected.extend(scrape_category(base_url, cu, session))
+            collected.extend(scrape_category_paginated(base_url, cu, session))
         except Exception as e:
             logger.warning(f"Error in category {cu}: {e}", exc_info=True)
 
@@ -291,12 +359,8 @@ def build_url_list(cfg: ScrapingConfig, project_root: Path) -> Path:
     logger.info(f"Category URLs: {category_urls}")
 
     session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-    )
+    session.headers.update(BROWSER_HEADERS)
+    session.headers["Referer"] = base_url + "/"
 
     combined: List[str] = []
 
@@ -306,7 +370,10 @@ def build_url_list(cfg: ScrapingConfig, project_root: Path) -> Path:
         logger.info("start_url not set in scraping.yaml — skipping AllPages.")
 
     combined.extend(scrape_all_categories(base_url, category_urls, session))
-    combined = list(set(combined))
+
+    # normalize + dedupe early
+    combined = [normalize_url(u) for u in combined]
+    combined = list(dict.fromkeys(combined))  # stable unique
     logger.info(f"Combined (before filtering): {len(combined)}")
 
     filtered = [u for u in combined if filter_article(u)]
@@ -326,20 +393,6 @@ def build_url_list(cfg: ScrapingConfig, project_root: Path) -> Path:
 
 
 # ---------------------- PAGE SCRAPING ----------------------
-
-
-def safe_filename_from_url(url: str) -> str:
-    parts = urlsplit(url)
-    host = parts.netloc.replace(".", "_")
-    path = unquote(parts.path).strip("/").replace("/", "_").replace(" ", "_")
-
-    base = f"{host}_{path}" if path else host
-    base = base[:180]
-    base = "".join(c if (c.isalnum() or c in "._-") else "_" for c in base)
-    if not base:
-        base = "page"
-    return base + ".html"
-
 
 def read_url_list(path: Path) -> List[str]:
     urls: List[str] = []
@@ -369,24 +422,11 @@ def extract_plain_text(html: str) -> str:
     return cleaned
 
 
-def _page_title_from_url(url: str) -> str:
-    """Extract MediaWiki page title from wiki URL (part after /wiki/)."""
-    if "/wiki/" not in url:
-        return ""
-    path = url.split("/wiki/", 1)[1]
-    return unquote(path)
-
-
-def fetch_page_via_api(base_url: str, url: str, session: requests.Session, timeout: int = 30) -> str:
+def fetch_page_via_api(base_url: str, title: str, session: requests.Session, timeout: int = DEFAULT_TIMEOUT) -> str:
     """
-    Fetch page content via MediaWiki parse API. Use when HTML fetch returns 403.
-    Returns HTML wrapped in mw-parser-output div for compatibility with extract_plain_text.
+    Fetch page HTML via MediaWiki parse API. Robust fallback when direct HTML fetch is blocked.
     """
-    api_url = urljoin(base_url, "/api.php")
-    title = _page_title_from_url(url)
-    if not title:
-        raise ValueError(f"Cannot extract page title from URL: {url}")
-
+    api_url = _api_url(base_url)
     params = {
         "action": "parse",
         "page": title,
@@ -408,10 +448,9 @@ def fetch_page_via_api(base_url: str, url: str, session: requests.Session, timeo
     return f'<div class="mw-parser-output">{text}</div>'
 
 
-def fetch_html(session: requests.Session, url: str, timeout: int = 20) -> str:
+def fetch_html(session: requests.Session, url: str, timeout: int = DEFAULT_TIMEOUT) -> Tuple[str, str]:
     resp = session.get(url, timeout=timeout, allow_redirects=True)
     resp.raise_for_status()
-    # Return both the HTML and the final URL after redirects
     return resp.text, resp.url
 
 
@@ -420,59 +459,24 @@ def fetch_html_or_api(
     url: str,
     base_url: str,
     use_api_fallback: bool = True,
-    timeout: int = 20,
-) -> str:
+    timeout: int = DEFAULT_TIMEOUT,
+) -> Tuple[str, str]:
     """
-    Fetch page HTML. On 403, fall back to MediaWiki parse API if use_api_fallback.
+    Try HTML fetch first. If blocked (403) and allowed, fall back to parse API.
+    Returns: (html, final_url)
     """
     try:
         html, final_url = fetch_html(session, url, timeout=timeout)
         return html, final_url
     except requests.HTTPError as e:
         if use_api_fallback and e.response is not None and e.response.status_code == 403:
-            logger.info(f"    403 on HTML fetch, trying MediaWiki API for {url}")
-            html = fetch_page_via_api(base_url, url, session, timeout=timeout)
-            return html, url  # API fallback, use original URL
+            logger.info(f"    403 on HTML fetch, trying MediaWiki API parse for {url}")
+            title = _page_title_from_url(url)
+            if not title:
+                raise
+            html = fetch_page_via_api(base_url, title, session, timeout=timeout)
+            return html, url
         raise
-
-
-def extract_article_id(html: str) -> Optional[str]:
-    # Try to match various patterns for article ID in JS/JSON
-    patterns = [
-        # Matches: "wgArticleId": 12345, 'wgArticleId': 12345, "wgArticleId" : "12345", etc.
-        r'["\']wgArticleId["\']\s*:\s*["\']?(\d+)["\']?',
-        r'["\']wgRelevantArticleId["\']\s*:\s*["\']?(\d+)["\']?',
-        # Matches: wgArticleId = 12345;
-        r'wgArticleId\s*=\s*["\']?(\d+)["\']?',
-        r'wgRelevantArticleId\s*=\s*["\']?(\d+)["\']?',
-    ]
-    for pat in patterns:
-        m = re.search(pat, html)
-        if m:
-            return m.group(1)
-
-    # Try to parse RLCONF or similar JS objects
-    m = re.search(r'RLCONF\s*=\s*\{([^}]+)\}', html)
-    if m:
-        conf = m.group(1)
-        m2 = re.search(r'wgArticleId"\s*:\s*(\d+)', conf)
-        if m2:
-            return m2.group(1)
-        m2 = re.search(r'wgRelevantArticleId"\s*:\s*(\d+)', conf)
-        if m2:
-            return m2.group(1)
-
-    # Fallback to meta tags
-    soup = BeautifulSoup(html, "html.parser")
-    meta = soup.find("meta", {"property": "mw:pageId"})
-    if meta and meta.get("content") and str(meta["content"]).isdigit():
-        return str(meta["content"])
-
-    meta2 = soup.find("meta", {"name": "pageId"})
-    if meta2 and meta2.get("content") and str(meta2["content"]).isdigit():
-        return str(meta2["content"])
-
-    return None
 
 
 def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
@@ -504,8 +508,7 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
     max_html_bytes = 0
     max_text_bytes = 0
 
-    # Optional: Save mapping from original URL to final URL
-    url_mapping = []
+    url_mapping: List[Tuple[str, str]] = []
 
     for i, url in enumerate(urls, start=1):
         logger.info(f"[{i}/{total}] Fetching → {url}")
@@ -514,48 +517,46 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
         for attempt in range(1, 4):
             try:
                 html, final_url = fetch_html_or_api(
-                    session, url, base_url,
+                    session,
+                    url,
+                    base_url,
                     use_api_fallback=cfg.use_api_fallback,
+                    timeout=DEFAULT_TIMEOUT,
                 )
 
-                # Save mapping for traceability
                 if url != final_url:
                     logger.info(f"    Redirected to final URL: {final_url}")
                 url_mapping.append((url, final_url))
 
-
-                # Only save if article ID is found
-                article_id = extract_article_id(html)
-                if not article_id:
-                    logger.warning(f"    Could not extract article ID; skipping page (final URL: {final_url})")
+                # ✅ Reliable ID: pageid via API (using final title when possible)
+                title = _page_title_from_url(final_url) or _page_title_from_url(url)
+                page_id = get_page_id_via_api(base_url, title, session)
+                if not page_id:
+                    logger.warning(f"    Could not resolve pageid via API; skipping (title={title!r})")
                     skipped += 1
                     ok = True
                     break
 
-                fname = f"{article_id}.html"
-                out_path = output_dir / fname
-
+                out_path = output_dir / f"{page_id}.html"
                 if out_path.exists():
                     logger.info(f"    SKIP (exists) → {out_path.name}")
                     skipped += 1
                     ok = True
                     break
 
-                # HTML
+                # Write HTML
                 html_bytes = html.encode("utf-8")
-                with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(html)
+                out_path.write_text(html, encoding="utf-8")
                 logger.info(f"    Saved HTML → {out_path}")
 
                 total_html_bytes += len(html_bytes)
                 max_html_bytes = max(max_html_bytes, len(html_bytes))
 
-                # TEXT
+                # Write TEXT
                 plain_text = extract_plain_text(html)
                 txt_path = out_path.with_suffix(".txt")
                 text_bytes = plain_text.encode("utf-8")
-                with open(txt_path, "w", encoding="utf-8") as f:
-                    f.write(plain_text)
+                txt_path.write_text(plain_text, encoding="utf-8")
                 logger.info(f"    Saved TEXT → {txt_path}")
 
                 total_text_bytes += len(text_bytes)
@@ -566,16 +567,13 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
                 break
 
             except Exception as e:
-                logger.warning(
-                    f"    Attempt {attempt}/3 failed for {url}: {e}"
-                )
+                logger.warning(f"    Attempt {attempt}/3 failed for {url}: {e}", exc_info=True)
                 time.sleep(1.0 * attempt)
 
         if not ok:
             logger.error(f"    FAILED: {url}")
             failed += 1
 
-        # milestone progress every 50 articles
         if i % 50 == 0:
             logger.info(
                 f"[Progress] Processed {i}/{total} pages "
@@ -584,7 +582,6 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
 
         time.sleep(cfg.delay_seconds)
 
-    # Optionally, write mapping to file for traceability
     mapping_path = output_dir / "url_redirect_mapping.tsv"
     with open(mapping_path, "w", encoding="utf-8") as f:
         f.write("original_url\tfinal_url\n")
@@ -606,33 +603,18 @@ def scrape_pages(cfg: ScrapingConfig, project_root: Path) -> None:
         "downloaded": success,
         "skipped": skipped,
         "failed": failed,
-        "html_bytes": {
-            "total": total_html_bytes,
-            "avg": avg_html_bytes,
-            "max": max_html_bytes,
-        },
-        "text_bytes": {
-            "total": total_text_bytes,
-            "avg": avg_text_bytes,
-            "max": max_text_bytes,
-        },
+        "html_bytes": {"total": total_html_bytes, "avg": avg_html_bytes, "max": max_html_bytes},
+        "text_bytes": {"total": total_text_bytes, "avg": avg_text_bytes, "max": max_text_bytes},
     }
 
     logger.info(f"Scraping stats: {scraping_stats}")
-
-    # write into stats/<domain>.json
     update_scraping_stats(domain, scraping_stats)
+
 
 # ---------------------- PUBLIC ENTRYPOINT ----------------------
 
-
 def run_full_scrape(config_path: Optional[Path] = None) -> Path:
-    """
-    High-level: load config, build URL list, then scrape pages.
-    Returns path to URL list.
-    """
     cfg = load_scraping_config(config_path)
-    # logger is configured in the calling script via create_logger
     logger.info(f"Starting full scrape for domain={cfg.domain}")
     url_list_path = build_url_list(cfg, PROJECT_ROOT)
     scrape_pages(cfg, PROJECT_ROOT)

@@ -23,6 +23,13 @@ Output JSONL format is identical to retrieval results for a clean evaluator inte
 Exp 6  (re-ranker model):      model_name selects which cross-encoder to use
 Exp 7  (re-ranker input size): top_k_input controls how many candidates are re-ranked
 
+Performance note
+----------------
+Use rerank_all_versions() instead of calling rerank() in a loop.
+The all-versions function loads the cross-encoder once, then processes every
+(retriever, version) pair with a single large batched predict() call.
+This is 10–15× faster because model loading and CUDA warm-up only happen once.
+
 Stage 3 — Fine-tuned re-ranker is deferred. The NegativeMiningAndDatasetGenerator
 module and ReRankerTrainer module are planned but not yet implemented.
 """
@@ -56,6 +63,7 @@ def rerank(
     version: int,
     query_records_by_id: dict[str, dict],
     version_key_prefix: str = "v",
+    cross_encoder=None,
 ) -> list[dict]:
     """
     Re-rank the top-K retrieved articles for each query using a cross-encoder.
@@ -66,16 +74,24 @@ def rerank(
         model_name:           Cross-encoder model name (Exp 6).
         top_k_input:          Number of candidates to re-rank (Exp 7).
         version:              Query version integer.
-        query_records_by_id:  Mapping from query_id → query record
-                              (used to get the query text for version).
+        query_records_by_id:  Mapping from query_id → query record.
         version_key_prefix:   Prefix for the query version key, default "v".
+        cross_encoder:        Pre-loaded CrossEncoder instance. If None, loads from
+                              model_name (slow — prefer passing a loaded instance).
 
     Returns:
         List of re-ranked result records.
     """
-    cross_encoder = _load_cross_encoder(model_name)
+    if cross_encoder is None:
+        cross_encoder = _load_cross_encoder(model_name)
+
     version_key   = f"{version_key_prefix}{version}"
-    reranked_results = []
+
+    # ── Build all pairs for this version in one batch ────────────────────────
+    # Collect (query_text, candidate_list) per record so we can do one big
+    # cross_encoder.predict() call instead of one per query.
+    records_with_pairs: list[tuple[dict, list[dict], int, int]] = []
+    all_pairs: list[list[str]] = []
 
     for rec in retrieval_results:
         query_id = rec["query_id"]
@@ -88,50 +104,123 @@ def rerank(
         if not query_text:
             continue
 
-        # Take top-K candidates from retrieval (Exp 7)
         candidates = rec.get("retrieved", [])[:top_k_input]
         if not candidates:
-            reranked_results.append({**rec, "reranker": model_name, "retrieved": []})
             continue
 
-        # Build (query, article_text) pairs for scoring
-        pairs = []
+        pair_start = len(all_pairs)
         for cand in candidates:
             article_text = article_lookup.get(cand["article_id"], "")
-            pairs.append([query_text, article_text])
+            all_pairs.append([query_text, article_text])
+        pair_end = len(all_pairs)
 
-        scores = cross_encoder.predict(pairs, convert_to_numpy=True)
+        records_with_pairs.append((rec, candidates, pair_start, pair_end))
 
-        # Sort by descending score
+    if not all_pairs:
+        return []
+
+    # One batched predict call for ALL queries in this version
+    all_scores = cross_encoder.predict(all_pairs, convert_to_numpy=True, show_progress_bar=False)
+
+    reranked_results = []
+    for rec, candidates, pair_start, pair_end in records_with_pairs:
+        scores = all_scores[pair_start:pair_end]
         scored = sorted(
             zip(candidates, scores.tolist()),
             key=lambda x: x[1],
             reverse=True,
         )
         reranked_retrieved = [
-            {
-                "article_id": cand["article_id"],
-                "score": score,
-                "rank": rank,
-            }
+            {"article_id": cand["article_id"], "score": score, "rank": rank}
             for rank, (cand, score) in enumerate(scored, start=1)
         ]
-
         reranked_results.append({
-            "query_id":         rec["query_id"],
-            "gold_article_id":  rec["gold_article_id"],
+            "query_id":          rec["query_id"],
+            "gold_article_id":   rec["gold_article_id"],
             "source_article_id": rec["source_article_id"],
-            "version":          version,
-            "retriever":        rec["retriever"],
-            "reranker":         model_name,
-            "retrieved":        reranked_retrieved,
+            "version":           version,
+            "retriever":         rec["retriever"],
+            "reranker":          model_name,
+            "retrieved":         reranked_retrieved,
         })
 
     log.info(
-        "[reranker] re-ranked %d queries (model=%s, top_k_input=%d)",
-        len(reranked_results), model_name, top_k_input,
+        "[reranker] re-ranked %d queries (model=%s, top_k_input=%d, n_pairs=%d)",
+        len(reranked_results), model_name, top_k_input, len(all_pairs),
     )
     return reranked_results
+
+
+def rerank_all_versions(
+    retrievers: list[str],
+    versions: list[int],
+    article_lookup: dict[int, str],
+    model_name: str,
+    top_k_input: int,
+    query_records_by_id: dict[str, dict],
+    get_ret_path_fn,
+    get_out_path_fn,
+    force: bool = False,
+) -> None:
+    """
+    Re-rank all (retriever, version) combinations using ONE loaded cross-encoder.
+
+    This is the fast path: the cross-encoder is loaded once, then all
+    (retriever × version) pairs are processed with batched predict() calls.
+    On Kudremukh (4× RTX 6000 Ada) this is ~12× faster than loading the model
+    per version.
+
+    Args:
+        retrievers:           List of retriever names to process.
+        versions:             List of version integers to process.
+        article_lookup:       article_id → article text mapping.
+        model_name:           Cross-encoder model name.
+        top_k_input:          Number of top candidates to re-rank per query.
+        query_records_by_id:  query_id → query record mapping.
+        get_ret_path_fn:      Callable(retriever, version) → Path of retrieval JSONL.
+        get_out_path_fn:      Callable(retriever, version) → Path to write reranking JSONL.
+        force:                Recompute even if output already exists.
+    """
+    # Identify which (retriever, version) pairs actually need computing
+    jobs: list[tuple[str, int]] = []
+    for retriever in retrievers:
+        for version in versions:
+            out_path = get_out_path_fn(retriever, version)
+            if out_path.exists() and not force:
+                log.info("[reranker] skip (cached): %s", out_path)
+                continue
+            ret_path = get_ret_path_fn(retriever, version)
+            if not ret_path.exists():
+                log.warning("[reranker] retrieval results not found: %s — skip", ret_path)
+                continue
+            jobs.append((retriever, version))
+
+    if not jobs:
+        log.info("[reranker] all (retriever, version) pairs already cached — skip")
+        return
+
+    log.info(
+        "[reranker] loading cross-encoder once for %d jobs: model=%s",
+        len(jobs), model_name,
+    )
+    cross_encoder = _load_cross_encoder(model_name)
+
+    for retriever, version in jobs:
+        ret_path = get_ret_path_fn(retriever, version)
+        out_path = get_out_path_fn(retriever, version)
+
+        retrieval_results = load_retrieval_results(ret_path)
+        reranked = rerank(
+            retrieval_results=retrieval_results,
+            article_lookup=article_lookup,
+            model_name=model_name,
+            top_k_input=top_k_input,
+            version=version,
+            query_records_by_id=query_records_by_id,
+            cross_encoder=cross_encoder,
+        )
+        save_reranking_results(reranked, out_path)
+        log.info("[reranker] done — retriever=%s v%d → %s", retriever, version, out_path)
 
 
 # ── Save / load ───────────────────────────────────────────────────────────────

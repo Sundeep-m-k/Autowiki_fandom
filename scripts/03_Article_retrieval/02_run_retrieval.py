@@ -89,9 +89,13 @@ def run_dense_retriever(
     top_k: int,
     force: bool,
 ) -> None:
-    """Run dense FAISS retrieval for all requested query versions."""
-    import numpy as np
-    from article_retrieval.embedder import embed_queries
+    """Run dense FAISS retrieval for all requested query versions.
+
+    Uses embed_queries_all_versions() to load the model once and encode
+    every version's queries in a single batched call — much faster than
+    loading the model once per version.
+    """
+    from article_retrieval.embedder import embed_queries_all_versions
 
     faiss_path = cu.get_faiss_index_path(config, domain, model_name)
     if not faiss_path.exists():
@@ -99,30 +103,37 @@ def run_dense_retriever(
         return
     faiss_index = ai_mod.load_faiss_index(faiss_path)
 
-    batch_size = config.get("parallel", {}).get("embedding_batch_size", 64)
+    batch_size = config.get("parallel", {}).get("embedding_batch_size", 256)
 
+    # Encode all versions in one model-load pass
+    version_embeddings = embed_queries_all_versions(
+        query_records=query_records,
+        versions=versions,
+        model_name=model_name,
+        get_emb_path_fn=lambda v: cu.get_query_embeddings_path(config, domain, model_name, v),
+        get_ids_path_fn=lambda v: cu.get_query_embeddings_ids_path(config, domain, model_name, v),
+        batch_size=batch_size,
+        force=force,
+    )
+
+    # Retrieve for each version using the cached embeddings
     for version in versions:
         out_path = cu.get_retrieval_path(config, domain, model_name, version, top_k)
         if out_path.exists() and not force:
             log.info("[02] skip (cached): %s", out_path)
             continue
 
-        version_key = f"v{version}"
-        qids  = [r["query_id"] for r in query_records if r.get("queries", {}).get(version_key)]
-        qtexts = [r["queries"][version_key] for r in query_records if r.get("queries", {}).get(version_key)]
-        filtered = [r for r in query_records if r.get("queries", {}).get(version_key)]
-
-        if not qtexts:
-            log.warning("[02] No queries for version v%d — skipping", version)
+        if version not in version_embeddings:
+            log.warning("[02] no embeddings for v%d (no query texts?) — skip", version)
             continue
 
-        emb_path = cu.get_query_embeddings_path(config, domain, model_name, version)
-        ids_path = cu.get_query_embeddings_ids_path(config, domain, model_name, version)
+        query_embeddings, cached_qids = version_embeddings[version]
+        version_key = f"v{version}"
+        filtered = [r for r in query_records if r.get("queries", {}).get(version_key)]
 
-        query_embeddings, _ = embed_queries(
-            qtexts, qids, model_name, emb_path, ids_path,
-            batch_size=batch_size, force=force,
-        )
+        if not filtered:
+            log.warning("[02] no query records for v%d — skip", version)
+            continue
 
         results = ret.retrieve_dense(
             faiss_index, article_ids, query_embeddings, filtered, version, top_k, model_name,

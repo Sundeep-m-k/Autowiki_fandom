@@ -32,6 +32,7 @@ from src.span_identification.preprocess import build_token_dataset
 from src.span_identification.hf_trainer import train_and_evaluate
 from src.span_identification.evaluator import evaluate_example, aggregate_metrics
 from src.span_identification.baselines import run_baseline
+from src.utils.stats_utils import update_span_id_stats
 
 
 def main() -> None:
@@ -256,6 +257,10 @@ def main() -> None:
                                 domain, granularity, model_name, label_scheme,
                                 seed, result.get("span_f1", 0),
                             )
+
+    # Update best-results summary in data/stats/<domain>.json
+    for domain in domains:
+        update_span_id_stats(domain, research_csv)
 
     log.info("[main] run complete. Results appended to %s", research_csv)
 
