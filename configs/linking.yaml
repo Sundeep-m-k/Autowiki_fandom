@@ -1,0 +1,5 @@
+# Linking Pipeline — general config.
+# Inherits all defaults from linking_base.yaml.
+base: "linking_base.yaml"
+
+domains: ["beverlyhillscop"]

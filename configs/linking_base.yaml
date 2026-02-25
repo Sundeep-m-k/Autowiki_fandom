@@ -1,0 +1,101 @@
+# Linking Pipeline base config — Task 3.
+# Combines Task 1 (span identification) with Task 2 (article retrieval)
+# to produce HTML articles with injected internal hyperlinks.
+#
+# Pipeline:
+#   1. Load gold spans from Task 1 test split (no model inference needed)
+#   2. Match each span to its pre-computed Task 2 retrieval/reranking result
+#      via (source_article_id, anchor_text) key
+#   3. Apply NIL threshold — discard links whose top-1 score is too low
+#   4. Render HTML with <a href="https://<domain>.fandom.com/wiki/<page>"> tags
+#
+# All Task 2 results are reused from disk — no GPU required at linking time.
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+data_dir: "data"
+processed_dir: "data/processed"
+span_id_dir: "data/span_id"
+article_retrieval_dir: "data/article_retrieval"
+linking_dir: "data/linking"
+research_dir: "data/research"
+log_dir: "data/logs"
+
+# ── Domains ────────────────────────────────────────────────────────────────────
+domains: ["beverlyhillscop"]
+
+# ── Fandom URL config ──────────────────────────────────────────────────────────
+# Base URL for each domain — used to build href in rendered HTML.
+# page_name is URL-encoded automatically (spaces → underscores).
+fandom_base_urls:
+  beverlyhillscop: "https://beverlyhillscop.fandom.com/wiki"
+  money-heist: "https://money-heist.fandom.com/wiki"
+
+# ── Task 1 settings ────────────────────────────────────────────────────────────
+task1:
+  # Which split to read ground-truth spans from.
+  # "test" ensures no overlap with training data.
+  split: "test"
+  granularity: "article"          # article / paragraph / sentence
+
+# ── Task 2 settings ────────────────────────────────────────────────────────────
+# These select which pre-computed retrieval/reranking result files to use.
+# All combinations matching these settings must already exist on disk
+# (produced by scripts/03_Article_retrieval/run_all.py).
+task2:
+  # Stage to use for linking: "retrieval" or "reranking".
+  # "reranking" gives higher precision at top-1 — recommended default.
+  stage: "reranking"
+
+  # Retriever whose results to load.
+  # Best from Task 2 experiments: msmarco-distilbert (MRR 0.84 after reranking)
+  retriever: "sentence-transformers/msmarco-distilbert-base-v4"
+
+  # Reranker model name (only used when stage=reranking).
+  reranker: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+  # Query version to use. Best from Task 2: v6 (MRR 0.468 avg retrieval).
+  query_version: 6
+
+  # Corpus / query config — must match what was used in Task 2 indexing.
+  # These are used to reconstruct the correct Task 2 artifact filenames.
+  corpus_representation: "title_full"
+  corpus_granularity: "article"
+  query_context_mode: "anchor_sentence"
+  anchor_preprocessing: "raw"
+  n_sample: 1000
+  top_k: 100
+  top_k_rerank: 20
+
+  # Ablation: try different retrievers or query versions without rerunning retrieval.
+  # Uncomment and change these to compare linking quality across Task 2 configs.
+  # retriever: "tfidf"
+  # stage: "retrieval"
+  # query_version: 10
+
+# ── NIL detection ──────────────────────────────────────────────────────────────
+# A span is assigned NIL (no link) if its top-1 retrieval/reranking score
+# is below this threshold. 0.0 = link everything (no NIL filtering).
+# Ablation values to try: [0.0, 0.1, 0.2, 0.5, 1.0]
+nil_detection:
+  threshold: 0.0
+
+# ── HTML rendering ─────────────────────────────────────────────────────────────
+html:
+  # When two predicted spans overlap, keep the longer one.
+  overlap_strategy: "longest"     # only option currently; "first" planned
+
+  # Wrap the full article in a <div class="wiki-article"> container.
+  wrap_article: true
+
+  # CSS class applied to every injected <a> tag.
+  link_class: "wiki-link"
+
+# ── Evaluation ─────────────────────────────────────────────────────────────────
+evaluation:
+  # Span match tolerance: how many characters of overlap are required
+  # to count a predicted span as matching a gold span.
+  # "exact" = char_start and char_end must match exactly.
+  span_match: "exact"
+
+# ── Research CSV ───────────────────────────────────────────────────────────────
+research_csv: "linking_experiments.csv"
