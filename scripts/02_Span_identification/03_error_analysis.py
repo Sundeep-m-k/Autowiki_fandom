@@ -19,12 +19,12 @@ python scripts/02_Span_identification/03_error_analysis.py --type model
 
 Output layout
 -------------
-data/research/error_analysis/<domain>/<granularity>/baseline_<name>/
+data/span_id/<domain>/error_analysis/<granularity>/baseline_<name>/
     errors_summary.json
     fp_samples.jsonl
     fn_samples.jsonl
 
-data/research/error_analysis/<domain>/<granularity>/model_<safe_model>_<scheme>_seed<s>/
+data/span_id/<domain>/error_analysis/<granularity>/model_<safe_model>_<scheme>_seed<s>/
     errors_summary.json
     fp_samples.jsonl
     fn_samples.jsonl
@@ -32,6 +32,7 @@ data/research/error_analysis/<domain>/<granularity>/model_<safe_model>_<scheme>_
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
@@ -39,6 +40,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.span_identification.config_utils import (
+    get_checkpoint_dir,
+    get_research_csv_path,
     get_span_id_log_dir,
     get_token_data_path,
     load_config,
@@ -139,12 +142,100 @@ def _run_baseline_analysis(
             max_fn=ea_cfg.get("max_fn_samples", 50),
             seed=ea_cfg.get("seed", 42),
         )
-        out = error_root / domain / granularity / f"baseline_{name}"
+        out = error_root / domain / "error_analysis" / granularity / f"baseline_{name}"
         save_error_analysis(out, summary, fp_samp, fn_samp)
         log.info(
             "[baseline_ea] %s/%s/%s  P=%.3f R=%.3f F1=%.3f  saved → %s",
             domain, granularity, name, prec, rec, f1, out,
         )
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _find_best_model(
+    config: dict,
+    domain: str,
+    granularity: str,
+    label_scheme: str,
+) -> tuple[str, int] | None:
+    """
+    Read the experiments CSV and return (model_name, best_seed) for the model
+    with the highest mean val_span_f1 across all seeds for the given
+    (domain, granularity, label_scheme) combination.
+
+    "Best seed" is the individual seed row that achieved the highest val_span_f1
+    for that winning model — this is the checkpoint we run error analysis on.
+
+    Returns None if no matching rows are found.
+    """
+    csv_path = get_research_csv_path(config, domain)
+    if not csv_path.exists():
+        return None
+
+    # model → list of (val_span_f1, seed) across all seeds
+    from collections import defaultdict
+    model_seed_f1: dict[str, list[tuple[float, int]]] = defaultdict(list)
+
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            if (
+                row.get("experiment_type") == "model"
+                and row.get("domain") == domain
+                and row.get("granularity") == granularity
+                and row.get("label_scheme") == label_scheme
+            ):
+                try:
+                    f1 = float(row["val_span_f1"])
+                    seed = int(row["seed"])
+                    model_seed_f1[row["model"]].append((f1, seed))
+                except (ValueError, KeyError):
+                    continue
+
+    if not model_seed_f1:
+        return None
+
+    # Pick the model with the highest mean val_span_f1 across seeds
+    best_model = max(
+        model_seed_f1,
+        key=lambda m: sum(f1 for f1, _ in model_seed_f1[m]) / len(model_seed_f1[m]),
+    )
+    # Within that model, use the seed that achieved the highest val_span_f1
+    best_seed = max(model_seed_f1[best_model], key=lambda t: t[0])[1]
+    return best_model, best_seed
+
+
+def _lookup_run_id(
+    config: dict,
+    domain: str,
+    granularity: str,
+    model_name: str,
+    label_scheme: str,
+    seed: int,
+) -> str | None:
+    """
+    Find the most recent run_id in the experiments CSV that matches the given
+    (domain, granularity, model, label_scheme, seed) combination.
+
+    Returns the run_id string (e.g. "20260225_095245"), or None if not found.
+    Iterates all rows so the last (most recent) matching run_id wins.
+    """
+    csv_path = get_research_csv_path(config, domain)
+    if not csv_path.exists():
+        return None
+
+    match: str | None = None
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            if (
+                row.get("experiment_type") == "model"
+                and row.get("domain") == domain
+                and row.get("granularity") == granularity
+                and row.get("model") == model_name
+                and row.get("label_scheme") == label_scheme
+                and row.get("seed") == str(seed)
+            ):
+                match = row["run_id"]
+    return match
 
 
 # ── Model error analysis ──────────────────────────────────────────────────────
@@ -158,21 +249,33 @@ def _run_model_analysis(
     error_root: Path,
     ea_cfg: dict,
     log,
+    seed: int | None = None,
 ) -> None:
     """Run error analysis for a single trained-model checkpoint."""
-    ckpt_root = PROJECT_ROOT / config.get("checkpoint_dir", "data/checkpoints")
-    max_seq   = config.get("model", {}).get("max_length", 512)
-    seeds     = config.get("seeds", [42])
-    fracs     = config.get("data_fractions", [1.0])
+    max_seq = config.get("model", {}).get("max_length", 512)
+    fracs   = config.get("data_fractions", [1.0])
 
-    seed = seeds[0]
+    if seed is None:
+        seed = config.get("seeds", [42])[0]
     frac = fracs[0]
+
+    # Resolve the run_id from the experiments CSV so we point at the right
+    # checkpoint directory (data/span_id/<domain>/checkpoints/<run_id>/).
+    run_id = _lookup_run_id(config, domain, granularity, model_name, label_scheme, seed)
+    if run_id is None:
+        log.warning(
+            "[model_ea] no matching run in experiments CSV for %s/%s/%s/%s seed=%d — skipping",
+            domain, granularity, model_name, label_scheme, seed,
+        )
+        return
+
+    ckpt_root = PROJECT_ROOT / get_checkpoint_dir(config, run_id, domain)
 
     ckpt_dir = find_checkpoints(ckpt_root, domain, granularity, model_name, label_scheme, seed, frac)
     if ckpt_dir is None:
         log.warning(
-            "[model_ea] checkpoint not found for %s/%s/%s/%s seed=%d frac=%s — skipping",
-            domain, granularity, model_name, label_scheme, seed, frac,
+            "[model_ea] checkpoint not found for %s/%s/%s/%s seed=%d frac=%s run_id=%s — skipping",
+            domain, granularity, model_name, label_scheme, seed, frac, run_id,
         )
         return
 
@@ -195,7 +298,7 @@ def _run_model_analysis(
         return
 
     safe_model = model_name.replace("/", "_")
-    out = error_root / domain / granularity / f"model_{safe_model}_{label_scheme}_seed{seed}"
+    out = error_root / domain / "error_analysis" / granularity / f"model_{safe_model}_{label_scheme}_seed{seed}"
 
     run_model_error_analysis(
         checkpoint_dir=ckpt_dir,
@@ -222,20 +325,17 @@ def main() -> None:
 
     domains       = [args.domain]      if args.domain      else config.get("domains",       ["beverlyhillscop"])
     granularities = [args.granularity] if args.granularity else config.get("granularities", ["sentence", "paragraph", "article"])
-    models        = config.get("models", ["bert-base-uncased"])
     label_schemes = config.get("label_schemes", ["BIO", "BILOU"])
     ea_cfg        = config.get("error_analysis", {})
 
     run_baseline_ea = args.type in ("baseline", "all")
     run_model_ea    = args.type in ("model", "all")
 
-    if args.model:
-        models = [args.model]
     if args.label_scheme:
         label_schemes = [args.label_scheme]
 
-    research_dir = PROJECT_ROOT / config.get("research_dir", "data/research")
-    error_root   = research_dir / "error_analysis"
+    span_id_dir = PROJECT_ROOT / config.get("span_id_dir", "data/span_id")
+    error_root  = span_id_dir
 
     log = setup_span_id_logger(
         log_dir=str(PROJECT_ROOT / config.get("log_dir", "data/logs") / "error_analysis"),
@@ -251,12 +351,33 @@ def main() -> None:
                 _run_baseline_analysis(config, domain, granularity, error_root, ea_cfg, log)
 
             if run_model_ea:
-                for model_name in models:
-                    for label_scheme in label_schemes:
+                for label_scheme in label_schemes:
+                    if args.model:
+                        # Manual override: use the specified model with seeds[0]
                         _run_model_analysis(
                             config, domain, granularity,
-                            model_name, label_scheme,
+                            args.model, label_scheme,
                             error_root, ea_cfg, log,
+                        )
+                    else:
+                        # Auto-select the best model from the experiments CSV
+                        result = _find_best_model(config, domain, granularity, label_scheme)
+                        if result is None:
+                            log.warning(
+                                "[main] no model results in CSV for %s/%s/%s — skipping",
+                                domain, granularity, label_scheme,
+                            )
+                            continue
+                        best_model, best_seed = result
+                        log.info(
+                            "[main] best model for %s/%s/%s → %s (seed=%d)",
+                            domain, granularity, label_scheme, best_model, best_seed,
+                        )
+                        _run_model_analysis(
+                            config, domain, granularity,
+                            best_model, label_scheme,
+                            error_root, ea_cfg, log,
+                            seed=best_seed,
                         )
 
     log.info("[main] error analysis complete.  Output root: %s", error_root)

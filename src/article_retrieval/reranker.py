@@ -106,7 +106,11 @@ def rerank(
         if not query_text:
             continue
 
-        candidates = rec.get("retrieved", [])[:top_k_input]
+        source_id = rec.get("source_article_id")
+        candidates = [
+            c for c in rec.get("retrieved", [])[:top_k_input]
+            if c.get("article_id") != source_id
+        ]
         if not candidates:
             continue
 

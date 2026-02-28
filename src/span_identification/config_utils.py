@@ -105,9 +105,13 @@ def get_checkpoint_dir(config: dict, run_id: str, domain: str) -> Path:
     return span_id_base / domain / "checkpoints" / run_id
 
 
-def get_research_csv_path(config: dict) -> Path:
-    """Get path to research experiments CSV."""
-    return Path(config["research_dir"]) / config.get("research_csv", "span_id_experiments.csv")
+def get_research_csv_path(config: dict, domain: str = "") -> Path:
+    """Get path to research experiments CSV, scoped to a domain subdirectory if provided."""
+    base = Path(config["research_dir"])
+    csv_name = config.get("research_csv", "span_id_experiments.csv")
+    if domain:
+        return base / domain / csv_name
+    return base / csv_name
 
 
 def get_span_id_log_dir(config: dict, domain: str) -> Path:

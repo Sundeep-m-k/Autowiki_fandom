@@ -26,15 +26,31 @@ log = logging.getLogger("article_retrieval")
 
 # ── Per-query metrics ─────────────────────────────────────────────────────────
 
+def _filter_source(result: dict) -> list[dict]:
+    """Return the retrieved list with the source article removed and ranks re-assigned.
+
+    Queries are derived from anchor text inside the source article, so that
+    article always scores highest in retrieval — excluding it ensures metrics
+    reflect genuine link-target discovery ability.
+    """
+    source_id = result.get("source_article_id")
+    items = [r for r in result.get("retrieved", []) if r.get("article_id") != source_id]
+    return [{"article_id": r["article_id"], "score": r.get("score", 0.0), "rank": i + 1}
+            for i, r in enumerate(items)]
+
+
 def reciprocal_rank(result: dict) -> float:
     """
     Compute 1/rank for the first retrieved item matching gold_article_id.
     Returns 0.0 if the gold article is not in the retrieved list.
+
+    Uses the source-filtered retrieved list so the source article cannot
+    contribute to the MRR calculation.
     """
     gold = result.get("gold_article_id")
     if gold is None:
         return 0.0
-    for item in result.get("retrieved", []):
+    for item in _filter_source(result):
         if item.get("article_id") == gold:
             rank = item.get("rank", 0)
             return 1.0 / rank if rank > 0 else 0.0
@@ -42,11 +58,15 @@ def reciprocal_rank(result: dict) -> float:
 
 
 def is_hit_at_k(result: dict, k: int) -> bool:
-    """True if gold_article_id appears in the top-k retrieved articles."""
+    """True if gold_article_id appears in the top-k retrieved articles.
+
+    Uses the source-filtered retrieved list so the source article cannot
+    artificially inflate recall.
+    """
     gold = result.get("gold_article_id")
     if gold is None:
         return False
-    for item in result.get("retrieved", [])[:k]:
+    for item in _filter_source(result)[:k]:
         if item.get("article_id") == gold:
             return True
     return False
@@ -71,12 +91,10 @@ def compute_metrics(
         return {f"recall_at_{k}": 0.0 for k in recall_at_k} | {"mrr": 0.0, "n_queries": 0}
 
     n = len(results)
-    max_retrieved = max((len(r.get("retrieved", [])) for r in results), default=0)
 
     metrics: dict[str, float] = {}
     for k in recall_at_k:
-        effective_k = min(k, max_retrieved)
-        hits = sum(1 for r in results if is_hit_at_k(r, effective_k))
+        hits = sum(1 for r in results if is_hit_at_k(r, k))
         metrics[f"recall_at_{k}"] = hits / n
 
     rrs = [reciprocal_rank(r) for r in results]

@@ -191,7 +191,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
-    config  = cu.load_config(ROOT / args.config)
+    config  = cu.resolve_config(cu.load_config(ROOT / args.config))
     domains = [args.domain] if args.domain else config.get("domains", [])
 
     cfg_sparse = config.get("retrievers", {}).get("sparse", [])

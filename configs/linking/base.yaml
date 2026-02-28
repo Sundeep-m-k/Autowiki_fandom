@@ -21,7 +21,7 @@ research_dir: "data/research"
 log_dir: "data/logs"
 
 # ── Domains ────────────────────────────────────────────────────────────────────
-domains: ["beverlyhillscop"]
+domains: ["money-heist"]
 
 # ── Fandom URL config ──────────────────────────────────────────────────────────
 # Base URL for each domain — used to build href in rendered HTML.

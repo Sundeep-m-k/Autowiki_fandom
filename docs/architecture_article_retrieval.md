@@ -19,17 +19,21 @@ The pipeline is designed so that Task 3 can consume Task 2's outputs with minima
 
 ## Motivation and Design Principles
 
-1. **Research-first**: Every run writes to the research CSV so that all results — BM25 baseline
-   through cross-encoder re-ranking — are directly comparable.
-2. **Cache everything**: Indexes, embeddings, query datasets, retrieval and reranking results are
-   all persisted to disk. Restarting a run resumes from the last completed step.
-3. **Clean interfaces**: Each pipeline stage reads JSONL written by the previous stage. Changing a
-   retriever does not require changing the evaluator. Changing the query format does not require
-   rebuilding the article index.
-4. **Config-driven**: All 11 experiment dimensions are expressed in YAML. A script only knows
-   what the config tells it.
-5. **Artifact naming**: Every output file encodes the experiment dimensions that produced it
-   (see *Artifact Naming Convention* below) so that multiple runs coexist on disk.
+1. **Research-first**: Every run appends to the research CSV so that all results — BM25
+   baseline through fine-tuned cross-encoder re-ranking — are directly comparable.
+2. **All 11 experiments in one run**: `run_all.py` iterates the Cartesian product of all
+   ablation dimension lists in the config. Each combination produces independent artifacts
+   via dimension-encoded filenames — no manual re-running needed.
+3. **Cache everything**: Indexes, embeddings, query datasets, retrieval and reranking results
+   are all persisted to disk. Restarting a run resumes from the last completed step.
+4. **Clean interfaces**: Each pipeline stage reads JSONL written by the previous stage.
+   Changing a retriever does not require changing the evaluator.
+5. **Config-driven**: All 11 experiment dimensions are expressed in YAML as lists.
+   `get_ablation_configs()` expands them into single-valued configs for each combination.
+6. **Artifact naming**: Every output file encodes the experiment dimensions that produced it
+   so that multiple runs coexist on disk without collision.
+7. **Per-domain research CSVs**: Results are saved to `data/research/<domain>/` rather than
+   a single shared file, enabling clean per-domain analysis and cross-domain aggregation.
 
 ---
 
@@ -68,18 +72,55 @@ The pipeline is designed so that Task 3 can consume Task 2's outputs with minima
              └─────────────┬─────────────────────────────────────┘
                            │
              ┌─────────────▼─────────────────────────────────────┐
-             │         Step 03: Run Reranking                     │
+             │         Step 03: Run Reranking (zero-shot)         │
              │  Cross-encoder scores top-K_input candidates       │
-             │  → <retriever>_<reranker>_..._v<N>.jsonl          │
+             │  One model load per reranker — all versions batched│
+             │  → <retriever>_<reranker>_topk<K>_..._v<N>.jsonl  │
              └─────────────┬─────────────────────────────────────┘
                            │
              ┌─────────────▼─────────────────────────────────────┐
-             │         Step 04: Evaluate                          │
+             │    Step 04: Train Reranker (optional)              │
+             │  Mine (query, positive, hard negative) triples     │
+             │  from step 02 retrieval results                    │
+             │  Fine-tune CrossEncoder with binary cross-entropy  │
+             │  Only train-split queries used (no test leakage)   │
+             │  → data/article_retrieval/checkpoints/reranker_*/  │
+             └─────────────┬─────────────────────────────────────┘
+                           │
+             ┌─────────────▼─────────────────────────────────────┐
+             │         Step 05: Evaluate                          │
              │  Recall@1,3,5,10,20,50,100 and MRR                │
              │  → per-version metrics JSON                        │
-             │  → article_retrieval_experiments.csv               │
+             │  → data/research/<domain>/                         │
+             │      article_retrieval_experiments.csv             │
              └────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Ablation Sweep: All 11 Experiments in One Run
+
+`run_all.py` calls `get_ablation_configs(config)` which expands all plural config keys
+into a list of single-valued configs via Cartesian product. The pipeline loops over every
+combination, with skip logic (cached artifacts are not recomputed).
+
+| # | Dimension | Config key | Values |
+|---|-----------|------------|--------|
+| 1 | Query versions | `queries.versions` | v1–v24 (inner loop in step 02) |
+| 2 | Retriever model | `retrievers.sparse/dense` | BM25, TF-IDF, 4 dense models |
+| 3 | Corpus representation | `article_index.corpus_representations` | `title_full`, `title_only`, `title_lead` |
+| 4 | Query-side context | `queries.query_context_modes` | `anchor_sentence`, `anchor_only`, `anchor_paragraph` |
+| 5 | Corpus granularity | `article_index.corpus_granularities` | `article`, `paragraph`, `sentence` |
+| 6 | Re-ranker model | `reranking.models` | 3 cross-encoder variants |
+| 7 | Re-ranker input K | `reranking.top_k_inputs` | `5`, `10`, `20`, `50` |
+| 8 | Domain | `domains` | one or more Fandom wikis |
+| 9 | Query sample size | `queries.n_samples` | `1000`, `null` (all) |
+| 10 | FAISS index type | `faiss_index_type` | `flat` (ivf/hnsw — future) |
+| 11 | Anchor preprocessing | `queries.anchor_preprocessings` | `raw`, `lowercase`, `stopword_removed` |
+
+Standalone sub-scripts (`02_run_retrieval.py`, etc.) call `cu.resolve_config()` which
+picks the first ablation combination as the default — so they work correctly when run
+directly with a base config.
 
 ---
 
@@ -88,11 +129,11 @@ The pipeline is designed so that Task 3 can consume Task 2's outputs with minima
 ```
 data/article_retrieval/<domain>/
 ├── article_index/
-│   ├── articles_<repr>_<gran>.jsonl          # persisted article text records
-│   ├── bm25_<repr>_<gran>_<preproc>.pkl      # BM25 index
-│   ├── tfidf_<repr>_<gran>_<preproc>.pkl     # TF-IDF vectorizer
+│   ├── articles_<repr>_<gran>.jsonl             # persisted article text records
+│   ├── bm25_<repr>_<gran>_<preproc>.pkl         # BM25 index
+│   ├── tfidf_<repr>_<gran>_<preproc>.pkl        # TF-IDF vectorizer
 │   ├── tfidf_matrix_<repr>_<gran>_<preproc>.npz
-│   ├── embeddings_<model>_<repr>_<gran>.npy  # article embeddings
+│   ├── embeddings_<model>_<repr>_<gran>.npy     # article embeddings
 │   ├── embeddings_<model>_<repr>_<gran>_ids.json
 │   ├── faiss_<model>_<repr>_<gran>_flat.index
 │   ├── faiss_<model>_<repr>_<gran>_flat_meta.json
@@ -105,13 +146,18 @@ data/article_retrieval/<domain>/
 │   └── <retriever>_<repr>_<gran>_<ctx>_<preproc>_n<N>_v<V>_top<K>.jsonl
 ├── reranking/
 │   └── <retriever>_<reranker>_topk<K>_<repr>_<gran>_<ctx>_<preproc>_n<N>_v<V>.jsonl
+├── reranker_training/
+│   └── reranker_train_<retriever>_<repr>_<gran>_<ctx>_<preproc>_n<N>_v<V>_neg<N>.jsonl
 └── metrics/
     ├── retrieval_<retriever>_..._v<V>.json
     ├── reranking_<retriever>_<reranker>_..._v<V>.json
     └── summary_<domain>.csv
 
-data/research/
-└── article_retrieval_experiments.csv          # global research log
+data/article_retrieval/checkpoints/
+└── reranker_finetuned/                          # fine-tuned CrossEncoder (if trained)
+
+data/research/<domain>/
+└── article_retrieval_experiments.csv            # per-domain research log
 
 data/logs/<domain>/article_retrieval/
 └── <timestamp>_<step>.log
@@ -123,14 +169,17 @@ data/logs/<domain>/article_retrieval/
 
 ### `src/article_retrieval/config_utils.py`
 
-- `load_config(path)` — YAML loader with `base:` inheritance (same pattern as Task 1).
-- `get_*_path(config, domain, ...)` — all artifact path resolution functions.
-- Path naming encodes active experiment dimensions so multiple configurations coexist.
-
-### `src/article_retrieval/logging_utils.py`
-
-- `setup_logger(log_dir, script_name)` — file + console logger, safe to call multiple times.
-- Same pattern as `span_identification/logging_utils.py`.
+- `load_config(path)` — YAML loader with `base:` inheritance.
+- `get_ablation_configs(config)` — expand plural ablation keys into a list of
+  single-valued configs via Cartesian product (Exps 3, 4, 5, 6, 7, 9, 11).
+- `resolve_config(config)` — for standalone script usage: returns the first ablation
+  config so path helpers always receive well-defined singular values.
+- `ablation_label(config)` — short human-readable label for logging.
+- `get_*_path(config, domain, ...)` — all artifact path resolution functions; naming
+  encodes active experiment dimensions.
+- `get_reranker_training_data_path(config, domain)` — path for mined training JSONL.
+- `get_reranker_checkpoint_dir(config)` — path for the fine-tuned model.
+- `get_research_csv_path(config, domain)` — `data/research/<domain>/article_retrieval_experiments.csv`.
 
 ### `src/article_retrieval/article_index.py`
 
@@ -152,7 +201,7 @@ Generates query dataset from ground truth links.
 | Constant/Function | Purpose |
 |---|---|
 | `QUERY_TEMPLATES` | 24 query variation templates. |
-| `CONTEXT_VERSIONS` | Versions that use `{paragraph_text}`. |
+| `CONTEXT_VERSIONS` | Versions that use `{paragraph_text}` (1, 3, 4, 22, 23). |
 | `generate_queries_for_link()` | Apply templates to one anchor + context. |
 | `build_query_dataset()` | End-to-end builder: filter → sample → generate → save. |
 | `load_query_dataset()` | Load persisted query JSONL. |
@@ -164,7 +213,7 @@ Dense text encoding with caching.
 | Function | Purpose |
 |---|---|
 | `embed_articles()` | Encode article texts; load from disk if cached. |
-| `embed_queries()` | Encode query texts for one (model, version) pair; cached. |
+| `embed_queries_all_versions()` | Encode all query versions in one model-load pass. |
 
 ### `src/article_retrieval/retriever.py`
 
@@ -177,10 +226,14 @@ Retrieval logic for all retriever types.
 | `retrieve_dense()` | FAISS inner product search for one (model, version) pair. |
 | `save/load_retrieval_results()` | JSONL I/O. |
 
+**Source article exclusion:** All three retrievers exclude `source_article_id` from
+returned results. Every query is built from anchor text inside the source article, so
+that article always scores highest without this filter — making metrics meaningless.
+
 **Output record format:**
 ```json
 {
-  "query_id": "beverlyhillscop_q_000001",
+  "query_id": "money-heist_q_000001",
   "gold_article_id": 42,
   "source_article_id": 17,
   "version": 3,
@@ -199,8 +252,26 @@ Zero-shot cross-encoder re-ranking.
 | Function | Purpose |
 |---|---|
 | `rerank()` | Score (query, article) pairs; re-sort top-K_input candidates. |
+| `rerank_all_versions()` | Load cross-encoder ONCE; process all (retriever × version) jobs in batch. |
 | `build_article_lookup()` | Build `article_id → text` dict for scoring. |
 | `save/load_reranking_results()` | JSONL I/O; same format as retriever output + `"reranker"` field. |
+
+The reranker also filters `source_article_id` from candidates before calling the
+cross-encoder, serving as a second line of defence.
+
+### `src/article_retrieval/reranker_trainer.py`
+
+Fine-tuning a cross-encoder on Fandom-specific retrieval data.
+
+| Function | Purpose |
+|---|---|
+| `build_training_examples()` | Mine (query, positive, hard negative) triples from retrieval results. Only uses training-split queries. |
+| `save/load_training_examples()` | JSONL I/O for mined training data (cached to disk). |
+| `train_reranker()` | Fine-tune a `CrossEncoder` with binary cross-entropy. Positive pairs → 1.0, negatives → 0.0. |
+
+Training data is mined directly from step 02 outputs — no separate negative mining
+pipeline needed. The gold article is the positive; top retrieved non-gold articles are
+the hard negatives.
 
 ### `src/article_retrieval/evaluator.py`
 
@@ -208,44 +279,11 @@ Metric computation and research CSV management.
 
 | Function | Purpose |
 |---|---|
-| `reciprocal_rank()` | 1/rank of first correct hit (per query). |
-| `is_hit_at_k()` | Boolean hit at rank K (per query). |
-| `compute_metrics()` | Aggregate Recall@K and MRR; K capped at corpus size. |
-| `append_to_research_csv()` | Append one row to `article_retrieval_experiments.csv`. |
-| `save_summary_csv()` | Write flat summary CSV for a domain. |
+| `compute_metrics()` | Aggregate Recall@K and MRR over a list of results. |
+| `append_to_research_csv()` | Append one row to the domain-scoped research CSV. |
 
----
-
-## Experiment Dimensions
-
-All 11 experiment dimensions are engineered into the config. Default values represent
-the best practice choice for Phase 1 (default run). Phase 2 ablations are commented out
-but ready to activate by changing one config key.
-
-| # | Dimension | Config key | Default | Phase 2 options |
-|---|---|---|---|---|
-| 1 | Query versions | `queries.versions` | 1–24 | subset, e.g. `[1,3,22,23]` |
-| 2 | Retriever model | `retrievers.sparse/dense` | BM25, TF-IDF, 5 dense models | add/remove models |
-| 3 | Corpus representation | `article_index.corpus_representation` | `title_full` | `title_only`, `title_lead` |
-| 4 | Query-side context | `queries.query_context_mode` | `anchor_sentence` | `anchor_only`, `anchor_paragraph` |
-| 5 | Corpus granularity | `article_index.corpus_granularity` | `article` | `paragraph`, `sentence` |
-| 6 | Re-ranker model | `reranking.model` | `ms-marco-MiniLM-L-6-v2` | larger CE models, BAAI/bge-reranker |
-| 7 | Re-ranker input K | `reranking.top_k_input` | `20` | `5`, `10`, `50` |
-| 8 | Domain | `domains` | `beverlyhillscop` | `money-heist`, multi-domain |
-| 9 | Query sample size | `queries.n_sample` | `1000` | `500`, `null` (all) |
-| 10 | FAISS index type | `faiss_index_type` | `flat` | `ivf`, `hnsw` (Future) |
-| 11 | Anchor preprocessing | `queries.anchor_preprocessing` | `raw` | `lowercase`, `stopword_removed` |
-
-### Execution Strategy
-
-Rather than a full combinatorial sweep (11 dimensions × all values = thousands of runs), we use
-a **default + ablation** strategy:
-
-1. **Default run**: Run all retrievers, all 24 query versions, with all other dimensions at their
-   default values. This produces 24 × (2 sparse + N dense) retrieval results plus re-ranking.
-2. **Ablation**: To test one dimension, change only that config key and rerun. Artifact naming
-   ensures results coexist and the research CSV accumulates all rows.
-3. **Multi-domain**: Run with `article_retrieval_kudremukh.yaml` which sets multiple domains.
+`_filter_source()` is applied inside metric functions as a defensive guard — even
+previously generated JSONL files produce correct metrics when re-evaluated.
 
 ---
 
@@ -265,14 +303,14 @@ Each line is one article with:
 
 ```json
 {
-  "query_id": "beverlyhillscop_q_000001",
-  "anchor_text": "Axel Foley",
+  "query_id": "money-heist_q_000001",
+  "anchor_text": "Berlin",
   "gold_article_id": 42,
   "source_article_id": 17,
-  "paragraph_text": "Axel Foley is a Detroit detective who travels to Beverly Hills.",
+  "paragraph_text": "Berlin is Álvaro Morte's character in the heist.",
   "queries": {
-    "v1": "Retrieve documents for the term 'Axel Foley', the context is: ...",
-    "v2": "Find an article that defines and explains 'Axel Foley'.",
+    "v1": "Retrieve documents for the term 'Berlin', the context is: ...",
+    "v2": "Find an article that defines and explains 'Berlin'.",
     "...": "..."
   }
 }
@@ -282,7 +320,7 @@ Each line is one article with:
 
 ```json
 {
-  "query_id": "beverlyhillscop_q_000001",
+  "query_id": "money-heist_q_000001",
   "gold_article_id": 42,
   "source_article_id": 17,
   "version": 3,
@@ -292,6 +330,16 @@ Each line is one article with:
     {"article_id": 42, "score": 3.21, "rank": 1},
     {"article_id": 11, "score": 2.87, "rank": 2}
   ]
+}
+```
+
+### Reranker Training Example Record
+
+```json
+{
+  "query": "Retrieve the topic discussing 'Berlin'.",
+  "positive": "Berlin is the alias of Andrés de Fonollosa, older brother of...",
+  "negative": "Nairobi is a character known for her role in the gold melting..."
 }
 ```
 
@@ -357,30 +405,45 @@ Versions using `{paragraph_text}` (context-dependent): **1, 3, 4, 22, 23**
 | `00_build_article_index.py` | 0 | Build BM25, TF-IDF, FAISS indexes |
 | `01_build_query_dataset.py` | 1 | Generate 24 query versions per link |
 | `02_run_retrieval.py` | 2 | Retrieve top-K articles per (retriever, version) |
-| `03_run_reranking.py` | 3 | Re-rank with cross-encoder |
-| `04_evaluate.py` | 4 | Compute metrics, write research CSV |
-| `aggregate_results.py` | — | Print summary table from research CSV |
-| `run_all.py` | — | Master orchestration with skip logic |
+| `03_run_reranking.py` | 3 | Zero-shot re-rank with cross-encoder |
+| `04_train_reranker.py` | 4 | Fine-tune cross-encoder on retrieval results (optional) |
+| `05_evaluate.py` | 5 | Compute metrics, write domain-scoped research CSV |
+| `aggregate_results.py` | — | Print summary table; auto-discovers all domain CSVs |
+| `visualise_results.py` | — | Plots saved to `data/article_retrieval/<domain>/plots/` |
+| `run_all.py` | — | Master orchestration: Cartesian sweep of all ablation combos |
 
 All scripts accept `--config`, `--domain`, `--force`, and specific filtering flags.
+All sub-scripts call `cu.resolve_config()` so they work correctly when run standalone.
 
 ---
 
 ## How to Run
 
-### Quick Start (single domain)
+### Quick start (single domain, all experiments)
 
 ```bash
 python scripts/03_Article_retrieval/run_all.py \
-    --config configs/article_retrieval.yaml \
-    --domain beverlyhillscop
+    --config configs/article_retrieval/article_retrieval.yaml \
+    --domain money-heist
 ```
 
 ### Multi-domain on Kudremukh
 
 ```bash
 python scripts/03_Article_retrieval/run_all.py \
-    --config configs/article_retrieval_kudremukh.yaml
+    --config configs/article_retrieval/kudremukh.yaml
+```
+
+### With reranker fine-tuning
+
+```yaml
+# In configs/article_retrieval/article_retrieval.yaml
+reranker_training:
+  enabled: true
+```
+
+```bash
+python scripts/03_Article_retrieval/run_all.py
 ```
 
 ### Ablation: BM25 baseline only, versions 1–5
@@ -391,7 +454,7 @@ python scripts/03_Article_retrieval/run_all.py \
     --versions 1,2,3,4,5
 ```
 
-### Resume interrupted run (skip already-done steps)
+### Resume interrupted run
 
 ```bash
 python scripts/03_Article_retrieval/run_all.py \
@@ -403,13 +466,12 @@ python scripts/03_Article_retrieval/run_all.py \
 
 ```bash
 python scripts/03_Article_retrieval/aggregate_results.py --top 20
+python scripts/03_Article_retrieval/aggregate_results.py --domain money-heist
 ```
 
 ---
 
 ## Dependencies
-
-Add to `requirements-article-retrieval.txt`:
 
 ```
 sentence-transformers>=2.2
@@ -426,45 +488,9 @@ For GPU: replace `faiss-cpu` with `faiss-gpu`.
 
 ---
 
-## Future Work (Stage 3)
-
-### Negative Mining and Dataset Generation
-
-After retrieval results are available, hard negatives (top-K retrieved but wrong articles)
-and easy negatives (random articles) can be mined to create a training dataset in
-`query_doc_score.csv` format for bi-encoder or cross-encoder fine-tuning.
-
-Key config keys (commented out in `article_retrieval_base.yaml`):
-```yaml
-negative_mining:
-  enabled: false
-  n_hard_negatives: 5
-  n_easy_negatives: 5
-```
-
-### Re-ranker Training
-
-If zero-shot re-ranking results are insufficient, the mined dataset can be used to
-fine-tune a cross-encoder on Fandom wiki data.
-
-Key config keys (commented out):
-```yaml
-reranker_training:
-  enabled: false
-  base_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
-  epochs: 5
-```
+## Future Work
 
 ### FAISS Approximate Search (Exp 10)
 
 For corpora of 100k+ articles, IVF and HNSW indexes reduce search time significantly.
-The infrastructure (`build_faiss_index` with `index_type` parameter) is already in place —
-only the implementation inside the `ivf`/`hnsw` branches needs to be uncommented.
-
-### Task 3: Linking Pipeline
-
-Task 3 will consume:
-- Task 1 output: predicted hyperlink spans from `hf_trainer.train_and_evaluate`
-- Task 2 output: top-K retrieved articles from retrieval/reranking results JSONL
-
-The clean JSONL interface between stages is designed explicitly for this integration.
+The infrastructure (`build_faiss_index` with `index_type` parameter) is already in place.

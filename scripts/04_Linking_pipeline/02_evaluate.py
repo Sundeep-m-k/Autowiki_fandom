@@ -81,7 +81,7 @@ def run_for_domain(config: dict, domain: str, force: bool) -> dict:
 
     save_metrics_json(agg, metrics_path)
 
-    csv_path = cu.get_research_csv_path(config)
+    csv_path = cu.get_research_csv_path(config, domain)
     append_to_research_csv(csv_path, domain, agg, config)
 
     return agg
@@ -97,10 +97,9 @@ def main() -> None:
     config  = cu.load_config(ROOT / args.config)
     domains = [args.domain] if args.domain else config.get("domains", [])
 
-    csv_path = cu.get_research_csv_path(config)
     for domain in domains:
         run_for_domain(config, domain, force=args.force)
-        update_linking_stats(domain, csv_path)
+        update_linking_stats(domain, cu.get_research_csv_path(config, domain))
 
 
 if __name__ == "__main__":

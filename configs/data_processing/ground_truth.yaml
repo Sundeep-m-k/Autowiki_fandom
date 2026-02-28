@@ -1,5 +1,5 @@
 # Ground truth build config
-domain: "money-heist"
+domain: "harrypotter"
 raw_dir: "data/raw"
 processed_dir: "data/processed"
 

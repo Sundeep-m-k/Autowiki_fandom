@@ -23,8 +23,6 @@ def main():
     log = setup_span_id_logger(log_dir=str(get_span_id_log_dir(config, domains[0])), script_name="02_run_baselines")
     log.info("[main] config loaded run_baselines")
 
-    research_csv = get_research_csv_path(config)
-    research_csv.parent.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     fieldnames = [
         "run_id", "timestamp", "seed", "experiment_type",
@@ -34,6 +32,8 @@ def main():
     ]
 
     def append_row(row):
+        research_csv = get_research_csv_path(config, row["domain"])
+        research_csv.parent.mkdir(parents=True, exist_ok=True)
         write_header = not research_csv.exists() or research_csv.stat().st_size == 0
         with open(research_csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
@@ -83,7 +83,7 @@ def main():
                     "notes": "",
                 })
 
-    log.info("[main] done. Results appended to %s", research_csv)
+    log.info("[main] done. Results saved to %s/<domain>/", config["research_dir"])
 
 
 if __name__ == "__main__":

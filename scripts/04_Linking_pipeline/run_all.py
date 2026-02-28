@@ -122,7 +122,7 @@ def main() -> None:
     print(f"  Linking pipeline complete in {total:.1f}s")
     print(f"  HTML output: data/linking/<domain>/html/")
     print(f"  Metrics:     data/linking/<domain>/metrics/")
-    print(f"  Research CSV: data/research/linking_experiments.csv")
+    print(f"  Research CSV: data/research/<domain>/linking_experiments.csv")
     print(f"{'=' * 70}")
 
 

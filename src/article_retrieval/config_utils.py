@@ -253,13 +253,148 @@ def get_summary_path(config: dict, domain: str) -> Path:
     return get_metrics_dir(config, domain) / f"summary_{domain}.csv"
 
 
+# ── Error analysis paths ───────────────────────────────────────────────────────
+
+def get_error_analysis_dir(config: dict, domain: str) -> Path:
+    """Root dir for error analysis outputs: data/article_retrieval/<domain>/error_analysis/"""
+    return get_retrieval_root(config, domain) / "error_analysis"
+
+
+def get_error_analysis_path(
+    config: dict,
+    domain: str,
+    retriever: str,
+    version: int,
+    stage: str = "retrieval",
+    reranker: str = "",
+) -> Path:
+    """Directory for one (stage, retriever, [reranker], version) error analysis run."""
+    ret_slug = _model_slug(retriever)
+    if stage == "reranking" and reranker:
+        rer_slug = _model_slug(reranker)
+        name = f"reranking_{ret_slug}_{rer_slug}_v{version}"
+    else:
+        name = f"retrieval_{ret_slug}_v{version}"
+    return get_error_analysis_dir(config, domain) / name
+
+
+# ── Ablation config expansion ──────────────────────────────────────────────────
+
+def get_ablation_configs(config: dict) -> list[dict]:
+    """
+    Expand a config that uses plural ablation keys into a list of single-valued
+    configs — one per Cartesian-product combination of all ablation dimensions.
+
+    Plural keys (new style)        → Singular keys injected into each config
+    ─────────────────────────────────────────────────────────────────────────
+    article_index.corpus_representations  → article_index.corpus_representation
+    article_index.corpus_granularities    → article_index.corpus_granularity
+    queries.query_context_modes           → queries.query_context_mode
+    queries.anchor_preprocessings         → queries.anchor_preprocessing
+    queries.n_samples                     → queries.n_sample
+    reranking.models                      → reranking.model
+    reranking.top_k_inputs                → reranking.top_k_input
+
+    If only the singular key is present (standalone script usage), that value is
+    wrapped in a one-element list so the loop still works.
+    """
+    import copy
+    import itertools
+
+    ai  = config.get("article_index", {})
+    q   = config.get("queries", {})
+    rer = config.get("reranking", {})
+
+    def _as_list(d: dict, plural_key: str, singular_key: str) -> list:
+        if plural_key in d:
+            return list(d[plural_key])
+        return [d.get(singular_key, None)]
+
+    corpus_reprs  = _as_list(ai,  "corpus_representations",  "corpus_representation")
+    corpus_grans  = _as_list(ai,  "corpus_granularities",    "corpus_granularity")
+    ctx_modes     = _as_list(q,   "query_context_modes",     "query_context_mode")
+    preprocs      = _as_list(q,   "anchor_preprocessings",   "anchor_preprocessing")
+    n_samples     = _as_list(q,   "n_samples",               "n_sample")
+    rer_models    = _as_list(rer, "models",                  "model")
+    rer_topks     = _as_list(rer, "top_k_inputs",            "top_k_input")
+
+    combos = list(itertools.product(
+        corpus_reprs, corpus_grans, ctx_modes, preprocs, n_samples, rer_models, rer_topks,
+    ))
+
+    configs = []
+    for corpus_repr, corpus_gran, ctx_mode, preproc, n_sample, rer_model, rer_topk in combos:
+        c = copy.deepcopy(config)
+        c.setdefault("article_index", {})
+        c["article_index"]["corpus_representation"] = corpus_repr
+        c["article_index"]["corpus_granularity"]    = corpus_gran
+        c.setdefault("queries", {})
+        c["queries"]["query_context_mode"]   = ctx_mode
+        c["queries"]["anchor_preprocessing"] = preproc
+        c["queries"]["n_sample"]             = n_sample
+        c.setdefault("reranking", {})
+        c["reranking"]["model"]       = rer_model
+        c["reranking"]["top_k_input"] = rer_topk
+        configs.append(c)
+
+    return configs
+
+
+def resolve_config(config: dict) -> dict:
+    """
+    For standalone script usage: if the config still has plural ablation keys,
+    resolve to the first combination so that path helpers work correctly.
+    Has no effect if all singular keys are already present.
+    """
+    combos = get_ablation_configs(config)
+    return combos[0] if combos else config
+
+
+def ablation_label(config: dict) -> str:
+    """Short human-readable label for one ablation config (for logging)."""
+    ai  = config.get("article_index", {})
+    q   = config.get("queries", {})
+    rer = config.get("reranking", {})
+    return (
+        f"repr={ai.get('corpus_representation','?')} "
+        f"gran={ai.get('corpus_granularity','?')} "
+        f"ctx={q.get('query_context_mode','?')} "
+        f"preproc={q.get('anchor_preprocessing','?')} "
+        f"n={q.get('n_sample','all')} "
+        f"rer={rer.get('model','?').split('/')[-1]} "
+        f"topk={rer.get('top_k_input','?')}"
+    )
+
+
 # ── Research CSV ───────────────────────────────────────────────────────────────
 
-def get_research_csv_path(config: dict) -> Path:
-    """Global research experiments CSV."""
-    return Path(config["research_dir"]) / config.get(
-        "research_csv", "article_retrieval_experiments.csv"
-    )
+def get_research_csv_path(config: dict, domain: str = "") -> Path:
+    """Research experiments CSV, scoped to a domain subdirectory if provided."""
+    base = Path(config["research_dir"])
+    csv_name = config.get("research_csv", "article_retrieval_experiments.csv")
+    if domain:
+        return base / domain / csv_name
+    return base / csv_name
+
+
+# ── Re-ranker training paths ───────────────────────────────────────────────────
+
+def get_reranker_training_data_path(config: dict, domain: str) -> Path:
+    """JSONL of (query, positive, negatives) training examples for one domain."""
+    rt = config.get("reranker_training", {})
+    retriever_slug = _model_slug(rt.get("source_retriever", "unknown"))
+    version        = rt.get("source_version", 6)
+    n_neg          = rt.get("n_hard_negatives", 5)
+    isuffix        = _index_suffix(config)
+    qsuffix        = _query_suffix(config)
+    name = f"reranker_train_{retriever_slug}_{isuffix}_{qsuffix}_v{version}_neg{n_neg}.jsonl"
+    return get_retrieval_root(config, domain) / "reranker_training" / name
+
+
+def get_reranker_checkpoint_dir(config: dict) -> Path:
+    """Directory where the fine-tuned cross-encoder is saved."""
+    rt = config.get("reranker_training", {})
+    return Path(rt.get("output_dir", "data/article_retrieval/checkpoints/reranker_finetuned"))
 
 
 # ── Task 1 split helpers (reuse existing splits) ───────────────────────────────

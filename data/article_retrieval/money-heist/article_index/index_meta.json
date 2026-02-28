@@ -4,7 +4,7 @@
   "corpus_representation": "title_full",
   "corpus_granularity": "article",
   "faiss_index_type": "flat",
-  "created_at": "2026-02-25T10:40:21.325828",
+  "created_at": "2026-02-28T03:10:15.734341",
   "dense_models": [
     "sentence-transformers/all-mpnet-base-v2",
     "sentence-transformers/all-MiniLM-L6-v2",

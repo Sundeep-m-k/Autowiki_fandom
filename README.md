@@ -34,32 +34,46 @@ The pipeline is split into three independent, composable tasks:
 
 ```
 Autowiki_fandom/
-├── configs/                        # All YAML configuration files
-│   ├── scraping.yaml               # Fandom scraper settings
-│   ├── ground_truth.yaml           # Ground truth builder settings
-│   ├── span_id_base.yaml           # Task 1 base config (all defaults)
-│   ├── span_id.yaml                # Task 1 local/default run
-│   ├── span_id_kudremukh.yaml      # Task 1 overrides for Kudremukh GPU server
-│   ├── article_retrieval_base.yaml # Task 2 base config (all experiment dims)
-│   ├── article_retrieval.yaml      # Task 2 local/default run
-│   ├── article_retrieval_kudremukh.yaml  # Task 2 overrides for Kudremukh
-│   ├── linking_base.yaml           # Task 3 base config
-│   └── linking.yaml                # Task 3 local/default run
+├── configs/
+│   ├── data_processing/
+│   │   ├── scraping.yaml               # Fandom scraper settings
+│   │   └── ground_truth.yaml           # Ground truth builder settings
+│   ├── span_id/
+│   │   ├── base.yaml                   # Task 1 base config (all defaults)
+│   │   ├── span_id.yaml                # Task 1 local/default run
+│   │   ├── kudremukh.yaml              # Task 1 overrides for Kudremukh GPU server
+│   │   ├── skanda.yaml                 # Task 1 overrides for Skanda GPU server
+│   │   └── error_analysis.yaml         # Task 1 error analysis settings
+│   ├── article_retrieval/
+│   │   ├── base.yaml                   # Task 2 base config (all 11 experiment dims as lists)
+│   │   ├── article_retrieval.yaml      # Task 2 local/default run
+│   │   └── kudremukh.yaml              # Task 2 compute overrides for Kudremukh
+│   └── linking/
+│       ├── base.yaml                   # Task 3 base config
+│       └── linking.yaml                # Task 3 local/default run
 │
 ├── scripts/
 │   ├── 01_Data_processing/
-│   │   ├── 00_scrape_fandom.py     # Scrape HTML from Fandom
-│   │   └── 01_build_ground_truth.py  # Build JSONL corpus with link annotations
+│   │   ├── 00_scrape_fandom.py         # Scrape HTML from Fandom
+│   │   └── 01_build_ground_truth.py    # Build JSONL corpus with link annotations
 │   ├── 02_Span_identification/
-│   │   ├── 01_run_span_id.py       # Full sweep: baselines + models
-│   │   └── 01_run_span_id_kudremukh.py  # Same, GPU-optimised
+│   │   ├── 01_run_span_id.py           # Full sweep: baselines + models (local)
+│   │   ├── 01_run_span_id_kudremukh.py # Same, optimised for Kudremukh (4× GPU)
+│   │   ├── 01_run_span_id_skanda.py    # Same, optimised for Skanda (1× GPU)
+│   │   ├── 02_run_baselines.py         # Rule-based baselines only
+│   │   ├── 03_error_analysis.py        # Per-model error analysis
+│   │   ├── 04_human_eval_sample.py     # Sample predictions for human evaluation
+│   │   ├── aggregate_seed_results.py   # Mean ± std across seeds
+│   │   └── compare_models.py           # Bootstrap significance testing
 │   ├── 03_Article_retrieval/
-│   │   ├── run_all.py              # Master script (auto-detects machine config)
+│   │   ├── run_all.py                  # Master script — runs all 11 experiments
 │   │   ├── 00_build_article_index.py
 │   │   ├── 01_build_query_dataset.py
 │   │   ├── 02_run_retrieval.py
 │   │   ├── 03_run_reranking.py
-│   │   ├── 04_evaluate.py
+│   │   ├── 04_train_reranker.py        # Fine-tune cross-encoder on retrieval results
+│   │   ├── 05_evaluate.py
+│   │   ├── aggregate_results.py
 │   │   └── visualise_results.py
 │   ├── 04_Linking_pipeline/
 │   │   ├── run_all.py
@@ -67,48 +81,52 @@ Autowiki_fandom/
 │   │   ├── 01_render_html.py
 │   │   ├── 02_evaluate.py
 │   │   └── visualise_linking.py
-│   ├── run_full_pipeline.py        # Master script for all 5 stages
-│   └── summarise_corpus.py         # Cross-domain stats dashboard
+│   ├── run_full_pipeline.py            # Master script for all 5 stages
+│   └── summarise_corpus.py             # Cross-domain stats dashboard
 │
 ├── src/
-│   ├── data_scraping/              # Fandom HTML scraper
-│   ├── span_identification/        # Task 1 library code
-│   │   ├── preprocess.py           # Tokenisation and BIO/BILOU labelling
-│   │   ├── hf_trainer.py           # HuggingFace Trainer wrapper
-│   │   ├── span_metrics.py         # Span + seqeval metrics
-│   │   ├── evaluator.py            # Character-level and exact-match metrics
-│   │   ├── baselines.py            # Rule-based baselines
-│   │   └── dataset.py              # Article-ID-based train/val/test splits
-│   ├── article_retrieval/          # Task 2 library code
-│   │   ├── query_builder.py        # 24 query variations per anchor span
-│   │   ├── embedder.py             # Dense encoding (SentenceTransformers + FAISS)
-│   │   ├── retriever.py            # BM25, TF-IDF, dense retrieval
-│   │   └── reranker.py             # Cross-encoder re-ranking
-│   ├── linking_pipeline/           # Task 3 library code
-│   │   ├── span_predictor.py       # Load gold spans from Task 1
-│   │   ├── span_to_query.py        # Match spans to Task 2 results
-│   │   ├── nil_detector.py         # Threshold-based NIL filtering
-│   │   └── html_renderer.py        # Inject <a> tags into HTML
+│   ├── data_scraping/                  # Fandom HTML scraper
+│   ├── span_identification/            # Task 1 library code
+│   │   ├── preprocess.py               # Tokenisation and BIO/BILOU labelling
+│   │   ├── hf_trainer.py               # HuggingFace Trainer wrapper
+│   │   ├── span_metrics.py             # Span + seqeval metrics
+│   │   ├── evaluator.py                # Character-level and exact-match metrics
+│   │   ├── baselines.py                # Rule-based baselines
+│   │   └── dataset.py                  # Article-ID-based train/val/test splits
+│   ├── article_retrieval/              # Task 2 library code
+│   │   ├── config_utils.py             # Path helpers + ablation config expansion
+│   │   ├── query_builder.py            # 24 query variations per anchor span
+│   │   ├── embedder.py                 # Dense encoding (SentenceTransformers + FAISS)
+│   │   ├── retriever.py                # BM25, TF-IDF, dense retrieval
+│   │   ├── reranker.py                 # Zero-shot cross-encoder re-ranking
+│   │   └── reranker_trainer.py         # Fine-tuning cross-encoder on retrieval data
+│   ├── linking_pipeline/               # Task 3 library code
+│   │   ├── span_predictor.py           # Load gold spans from Task 1
+│   │   ├── span_to_query.py            # Match spans to Task 2 results
+│   │   ├── nil_detector.py             # Threshold-based NIL filtering
+│   │   └── html_renderer.py            # Inject <a> tags into HTML
 │   └── utils/
-│       └── stats_utils.py          # Centralized stats tracking per domain
+│       └── stats_utils.py              # Centralised stats tracking per domain
 │
 ├── data/
-│   ├── processed/<domain>/         # Scraped + parsed JSONL files
-│   ├── span_id/<domain>/splits/    # Train/val/test splits (article-ID-based)
-│   ├── article_retrieval/<domain>/ # FAISS indexes, retrieval results, plots
-│   ├── linking/<domain>/           # Linking predictions, HTML output, plots
-│   ├── research/                   # Experiment result CSVs
+│   ├── processed/<domain>/             # Scraped + parsed JSONL files
+│   ├── span_id/<domain>/splits/        # Train/val/test splits (article-ID-based)
+│   ├── article_retrieval/<domain>/     # FAISS indexes, retrieval results, plots
+│   │   └── reranker_training/          # Mined training data for fine-tuned reranker
+│   ├── article_retrieval/checkpoints/  # Fine-tuned reranker model
+│   ├── linking/<domain>/               # Linking predictions, HTML output, plots
+│   ├── research/<domain>/              # Experiment result CSVs (one dir per domain)
 │   │   ├── span_id_experiments.csv
 │   │   ├── article_retrieval_experiments.csv
 │   │   └── linking_experiments.csv
-│   └── stats/<domain>.json         # Aggregated best results per domain
+│   └── stats/<domain>.json             # Aggregated best results per domain
 │
 ├── docs/
 │   ├── architecture_span_id.md
 │   ├── architecture_article_retrieval.md
 │   └── architecture_linking_pipeline.md
 │
-├── tests/                          # Automated tests
+├── tests/                              # Automated tests
 ├── requirements-span-id.txt
 └── requirements-article-retrieval.txt
 ```
@@ -150,17 +168,16 @@ Key dependencies:
 
 ```bash
 python scripts/01_Data_processing/00_scrape_fandom.py \
-    --config configs/scraping.yaml
+    --config configs/data_processing/scraping.yaml
 ```
 
-Scrapes HTML from `scraping.yaml → start_url` (currently `beverlyhillscop.fandom.com`).
-Saves raw HTML to `data/raw/<domain>/`.
+Scrapes HTML from `scraping.yaml → start_url`. Saves raw HTML to `data/raw/<domain>/`.
 
 ### Step 1 — Build Ground Truth
 
 ```bash
 python scripts/01_Data_processing/01_build_ground_truth.py \
-    --config configs/ground_truth.yaml
+    --config configs/data_processing/ground_truth.yaml
 ```
 
 Parses HTML, extracts internal links with character offsets, and writes:
@@ -171,8 +188,7 @@ Parses HTML, extracts internal links with character offsets, and writes:
 | `data/processed/<domain>/paragraphs_<domain>.jsonl` | Paragraph-level examples |
 | `data/processed/<domain>/sentences_<domain>.jsonl` | Sentence-level examples |
 
-Also updates `data/stats/<domain>.json` with dataset statistics (article count,
-paragraph count, sentence count, link type breakdown, split sizes).
+Also updates `data/stats/<domain>.json` with dataset statistics.
 
 ---
 
@@ -181,32 +197,31 @@ paragraph count, sentence count, link type breakdown, split sizes).
 **Goal:** Given a text unit (sentence / paragraph / article), predict which character
 spans should become hyperlinks.
 
-**Models:** `bert-base-uncased`, `microsoft/deberta-v3-base`, `SpanBERT/spanbert-base-cased`,
-`roberta-base`, `distilbert-base-uncased`
+**Models:** `bert-base-uncased`, `microsoft/deberta-v3-base`, `roberta-base`, `distilbert-base-uncased`
 
 **Labelling schemes:** BIO and BILOU (configured via `label_schemes` in config)
 
 **Baselines:** `rule_capitalized`, `heuristic_anchor`, `random`
 
-### Run (local)
+### Run
 
 ```bash
+# Local
 python scripts/02_Span_identification/01_run_span_id.py
-```
 
-### Run (Kudremukh GPU server)
-
-```bash
+# Kudremukh (4× RTX 6000 Ada)
 python scripts/02_Span_identification/01_run_span_id_kudremukh.py
+
+# Skanda (1× RTX A6000)
+python scripts/02_Span_identification/01_run_span_id_skanda.py
 ```
 
 ### Configuration
 
 ```yaml
-# configs/span_id_base.yaml (excerpt)
-models: ["bert-base-uncased", "microsoft/deberta-v3-base", ...]
-label_schemes: ["BIO", "BILOU"]
+# configs/span_id/base.yaml (excerpt)
 granularities: ["sentence", "paragraph", "article"]
+label_schemes: ["BIO", "BILOU"]
 seeds: [42, 123, 456]
 training:
   epochs: 20
@@ -214,16 +229,18 @@ training:
   batch_size: 32
 ```
 
-### Metrics (written to `data/research/span_id_experiments.csv`)
+Each machine-specific config (`kudremukh.yaml`, `skanda.yaml`) inherits `base.yaml` via
+`base: "base.yaml"` and overrides only `domains` and `models`.
+
+### Metrics (written to `data/research/<domain>/span_id_experiments.csv`)
 
 | Column | Description |
 |--------|-------------|
 | `span_f1` | Exact-boundary span F1 (primary metric) |
-| `span_precision` | Exact-boundary span precision |
-| `span_recall` | Exact-boundary span recall |
-| `char_f1` | Overlap/relaxed span F1 (token-level proxy for character F1) |
-| `exact_match_pct` | Fraction of gold spans exactly recalled, averaged over examples with ≥1 gold span |
-| `val_span_f1` | Validation span F1 (used for model selection) |
+| `span_precision` / `span_recall` | Exact-boundary precision / recall |
+| `char_f1` | Overlap/relaxed span F1 |
+| `exact_match_pct` | Fraction of gold spans exactly recalled |
+| `val_span_f1` | Validation span F1 (used for model selection / early stopping) |
 
 ### Architecture
 
@@ -240,25 +257,28 @@ target article from the wiki corpus.
 - Sparse baselines: `BM25`, `TF-IDF`
 - Dense bi-encoders: `all-mpnet-base-v2`, `all-MiniLM-L6-v2`,
   `msmarco-distilbert-base-v4`, `roberta-base`
-- Re-ranker: `cross-encoder/ms-marco-MiniLM-L-6-v2`
+- Zero-shot re-ranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` (and variants)
+- Fine-tuned re-ranker: trained on hard negatives mined from retrieval results (optional)
 
-**Query variations:** 24 query templates per anchor span (v1–v24), covering different
-formulations of the anchor text and surrounding context.
+**Query variations:** 24 query templates per anchor span (v1–v24).
 
 ### Run
 
 ```bash
-# Auto-detects machine config (kudremukh → kudremukh yaml, else base yaml)
+# Auto-detects machine config (kudremukh hostname → kudremukh.yaml, else article_retrieval.yaml)
 python scripts/03_Article_retrieval/run_all.py
 
 # Force specific config
 python scripts/03_Article_retrieval/run_all.py \
-    --config configs/article_retrieval_kudremukh.yaml
+    --config configs/article_retrieval/kudremukh.yaml
 
 # Single domain, skip indexing if already built
 python scripts/03_Article_retrieval/run_all.py \
-    --domain beverlyhillscop \
+    --domain money-heist \
     --skip-index --skip-queries
+
+# With reranker fine-tuning enabled (set reranker_training.enabled: true in config first)
+python scripts/03_Article_retrieval/run_all.py
 ```
 
 ### Pipeline steps
@@ -267,28 +287,55 @@ python scripts/03_Article_retrieval/run_all.py \
 00_build_article_index.py   → BM25 / TF-IDF / FAISS indexes
 01_build_query_dataset.py   → 24 query variations per anchor link
 02_run_retrieval.py         → Top-K candidates per (retriever, version)
-03_run_reranking.py         → Re-rank with cross-encoder
-04_evaluate.py              → Recall@K and MRR, write research CSV
+03_run_reranking.py         → Zero-shot re-rank with cross-encoder
+04_train_reranker.py        → Fine-tune cross-encoder on retrieval results (optional)
+05_evaluate.py              → Recall@K and MRR, write research CSV
 visualise_results.py        → Plots saved to data/article_retrieval/<domain>/plots/
 ```
 
-### Experiment dimensions (11 total)
+### All 11 experiments in a single run
 
-| # | Dimension | Values |
-|---|-----------|--------|
-| 1 | Query versions | v1–v24 |
-| 2 | Retriever model | BM25, TF-IDF, 4 dense models |
-| 3 | Corpus representation | title_only / title_lead / title_full |
-| 4 | Query-side context | anchor_only / anchor_sentence / anchor_paragraph |
-| 5 | Corpus granularity | article / paragraph / sentence |
-| 6 | Re-ranker model | cross-encoder/ms-marco-MiniLM-L-6-v2 |
-| 7 | Re-ranker input K | top_k_input (default 20) |
-| 8 | Domain | beverlyhillscop, money-heist, … |
-| 9 | Query sample size | n_sample (default 1000) |
-| 10 | FAISS index type | flat / ivf / hnsw (Phase 2) |
-| 11 | Anchor preprocessing | raw / lowercase / stopword_removed (Phase 2) |
+`run_all.py` iterates the **Cartesian product** of all ablation dimension lists declared
+in `base.yaml`. Each combination produces fully independent artifacts on disk (via
+dimension-encoded filenames) and appends a row to the research CSV.
 
-### Metrics (written to `data/research/article_retrieval_experiments.csv`)
+| # | Dimension | Config key | Values |
+|---|-----------|------------|--------|
+| 1 | Query versions | `queries.versions` | v1–v24 |
+| 2 | Retriever model | `retrievers.sparse/dense` | BM25, TF-IDF, 4 dense models |
+| 3 | Corpus representation | `article_index.corpus_representations` | `title_full`, `title_only`, `title_lead` |
+| 4 | Query-side context | `queries.query_context_modes` | `anchor_sentence`, `anchor_only`, `anchor_paragraph` |
+| 5 | Corpus granularity | `article_index.corpus_granularities` | `article`, `paragraph`, `sentence` |
+| 6 | Re-ranker model | `reranking.models` | 3 cross-encoder variants |
+| 7 | Re-ranker input K | `reranking.top_k_inputs` | `5`, `10`, `20`, `50` |
+| 8 | Domain | `domains` | `money-heist`, … |
+| 9 | Query sample size | `queries.n_samples` | `1000`, `null` (all) |
+| 10 | FAISS index type | `faiss_index_type` | `flat` (ivf/hnsw — future) |
+| 11 | Anchor preprocessing | `queries.anchor_preprocessings` | `raw`, `lowercase`, `stopword_removed` |
+
+### Reranker Fine-tuning (optional)
+
+Enable in `configs/article_retrieval/base.yaml`:
+
+```yaml
+reranker_training:
+  enabled: true
+  source_retriever: "sentence-transformers/all-mpnet-base-v2"
+  source_version: 6
+  base_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  n_hard_negatives: 5
+  epochs: 3
+  output_dir: "data/article_retrieval/checkpoints/reranker_finetuned"
+```
+
+Training data is mined directly from step 02 retrieval results — no separate
+negative mining step needed. Only **training-split** queries are used (source articles
+from the Task 1 train split), ensuring the test set is never seen during training.
+
+After training, add the checkpoint path to `reranking.models` to evaluate it as an
+additional Exp 6 variant.
+
+### Metrics (written to `data/research/<domain>/article_retrieval_experiments.csv`)
 
 `Recall@1`, `Recall@3`, `Recall@5`, `Recall@10`, `Recall@20`, `Recall@50`,
 `Recall@100`, `MRR`
@@ -309,18 +356,18 @@ See [`docs/architecture_article_retrieval.md`](docs/architecture_article_retriev
 ```
 Plain text
     │
-    ▼ (Phase 1) span_predictor.py
+    ▼ span_predictor.py
 Gold spans from Task 1 test split
     │
-    ▼ (Phase 2) span_to_query.py
+    ▼ span_to_query.py
 Match each span → pre-computed Task 2 result
 using key: (source_article_id, char_start, char_end)
     │
-    ▼ (Phase 3) nil_detector.py
+    ▼ nil_detector.py
 Filter spans whose top-1 score < nil_threshold
     │
-    ▼ (Phase 4) html_renderer.py
-Inject <a href="…"> tags, resolve overlapping spans
+    ▼ html_renderer.py
+Inject <a href="…"> tags, resolve overlapping spans (longest-wins)
     │
     ▼
 Linked HTML output
@@ -332,7 +379,7 @@ Task 2 results are reused from disk — **no GPU required at linking time**.
 
 ```bash
 python scripts/04_Linking_pipeline/run_all.py \
-    --config configs/linking.yaml
+    --config configs/linking/linking.yaml
 
 # Ablation: sweep NIL thresholds
 python scripts/04_Linking_pipeline/run_all.py \
@@ -348,7 +395,7 @@ python scripts/04_Linking_pipeline/run_all.py \
 visualise_linking.py    → plots saved to data/linking/<domain>/plots/
 ```
 
-### Metrics (written to `data/research/linking_experiments.csv`)
+### Metrics (written to `data/research/<domain>/linking_experiments.csv`)
 
 | Metric | Description |
 |--------|-------------|
@@ -370,13 +417,12 @@ Run all 5 stages end-to-end:
 
 ```bash
 python scripts/run_full_pipeline.py \
-    --domain beverlyhillscop
+    --domain money-heist
 
 # Skip stages already completed
 python scripts/run_full_pipeline.py \
     --skip-scraping \
-    --skip-ground-truth \
-    --domain beverlyhillscop
+    --skip-ground-truth
 
 # Force rebuild everything
 python scripts/run_full_pipeline.py --force
@@ -386,25 +432,29 @@ python scripts/run_full_pipeline.py --force
 
 ## Results and Statistics
 
-Each domain accumulates best results in `data/stats/<domain>.json`:
+Research outputs are saved **per domain** under `data/research/<domain>/`:
+
+```
+data/research/
+  money-heist/
+    span_id_experiments.csv
+    article_retrieval_experiments.csv
+    linking_experiments.csv
+  beverlyhillscop/
+    span_id_experiments.csv
+    ...
+```
+
+Aggregate cross-domain scripts (`aggregate_results.py`, `compare_models.py`) automatically
+discover all domain subdirectories and merge results for display.
+
+Each domain also accumulates best results in `data/stats/<domain>.json`:
 
 ```json
 {
-  "domain": "beverlyhillscop",
-  "dataset_stats": {
-    "num_articles": 129,
-    "num_paragraphs": 855,
-    "num_sentences": 3064,
-    "link_type_counts": { "internal": 974, "external": 9, "file": 117 },
-    "avg_article_length_chars": 3702,
-    "avg_internal_links_per_article": 7.55,
-    "split_sizes": {
-      "sentence":  { "train": 1874, "val": 742, "test": 448 },
-      "paragraph": { "train": 572,  "val": 157, "test": 126 },
-      "article":   { "train": 90,   "val": 19,  "test": 20  }
-    }
-  },
-  "span_id": { "overall_best": { ... } },
+  "domain": "money-heist",
+  "dataset_stats": { "num_articles": 129, "num_paragraphs": 855, ... },
+  "span_id": { "overall_best": { "model": "deberta-v3-base", "span_f1": 0.83, ... } },
   "article_retrieval": { "best_retrieval": { ... }, "best_reranking": { ... } },
   "linking_pipeline": { "best": { ... } }
 }
@@ -413,11 +463,10 @@ Each domain accumulates best results in `data/stats/<domain>.json`:
 Print a cross-domain dashboard:
 
 ```bash
-# Human-readable tables
 python scripts/summarise_corpus.py
 
 # Single domain
-python scripts/summarise_corpus.py --domain beverlyhillscop
+python scripts/summarise_corpus.py --domain money-heist
 
 # Save machine-readable summary
 python scripts/summarise_corpus.py --save
@@ -427,28 +476,38 @@ python scripts/summarise_corpus.py --save
 
 ## Configuration System
 
-All configs use YAML inheritance via a `base:` key:
+All configs use YAML inheritance via a `base:` key — machine-specific files override
+only what differs:
 
 ```yaml
-# configs/span_id_kudremukh.yaml
-base: "span_id_base.yaml"    # inherits all defaults
-domains: ["beverlyhillscop", "money-heist"]
-training:
-  batch_size: 64             # override only what differs
+# configs/article_retrieval/kudremukh.yaml
+base: "base.yaml"
+domains: ["money-heist"]
+parallel:
+  n_workers: 16
+  embedding_batch_size: 512
 ```
 
-Machine-specific configs:
+### Span Identification configs
 
-| Config | Machine | Notes |
-|--------|---------|-------|
-| `span_id_base.yaml` | any | default, 3 seeds, all models |
-| `span_id_kudremukh.yaml` | kudremukh | 4× RTX 6000 Ada, larger batches |
-| `article_retrieval_base.yaml` | any | default, all retrievers |
-| `article_retrieval_kudremukh.yaml` | kudremukh | batch_size=512, n_workers=16 |
+| Config | Purpose |
+|--------|---------|
+| `span_id/base.yaml` | All defaults: training hyperparams, early stopping, seeds, baselines |
+| `span_id/span_id.yaml` | Local run: sets `domains` and `models` |
+| `span_id/kudremukh.yaml` | Kudremukh (4× RTX 6000 Ada): same as `span_id.yaml` |
+| `span_id/skanda.yaml` | Skanda (1× RTX A6000): same as `span_id.yaml` |
+| `span_id/error_analysis.yaml` | Error analysis settings only (`domains` + `error_analysis` block) |
 
-The Article Retrieval `run_all.py` auto-detects the machine hostname and
-selects the appropriate config automatically — no `--config` flag needed
-on Kudremukh.
+### Article Retrieval configs
+
+| Config | Purpose |
+|--------|---------|
+| `article_retrieval/base.yaml` | All 11 experiment dimensions as **lists** for full sweep |
+| `article_retrieval/article_retrieval.yaml` | Local run: sets `domains` |
+| `article_retrieval/kudremukh.yaml` | Kudremukh: larger `n_workers` and `embedding_batch_size` |
+
+The Article Retrieval `run_all.py` auto-detects the machine hostname and selects the
+appropriate config automatically — no `--config` flag needed on Kudremukh.
 
 ---
 

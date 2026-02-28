@@ -2,4 +2,4 @@
 # Inherits all defaults from linking_base.yaml.
 base: "base.yaml"
 
-domains: ["beverlyhillscop"]
+domains: ["money-heist"]

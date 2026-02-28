@@ -36,6 +36,14 @@ log = logging.getLogger("article_retrieval")
 
 # ── BM25 ─────────────────────────────────────────────────────────────────────
 
+def _rerank_after_filter(retrieved: list[dict]) -> list[dict]:
+    """Re-assign contiguous ranks after any items have been removed."""
+    return [
+        {"article_id": r["article_id"], "score": r["score"], "rank": i + 1}
+        for i, r in enumerate(retrieved)
+    ]
+
+
 def retrieve_bm25(
     bm25_index,
     article_ids: list[int],
@@ -47,6 +55,10 @@ def retrieve_bm25(
     """
     Run BM25 retrieval for all queries for a given query version.
     Returns list of result records (not yet saved — caller decides).
+
+    The source article is excluded from results: because queries are derived
+    from anchor text inside the source article, that article always scores
+    highest and would trivially occupy rank 1 for most queries.
     """
     from article_retrieval.article_index import _tokenise
 
@@ -59,15 +71,21 @@ def retrieve_bm25(
             continue
         tokens = _tokenise(query_text, preprocessing)
         scores = bm25_index.get_scores(tokens)
-        top_indices = np.argsort(scores)[::-1][:top_k]
+        # Retrieve extra candidates to absorb the source article exclusion
+        top_indices = np.argsort(scores)[::-1][:top_k + 1]
 
+        source_id = rec.get("source_article_id")
         retrieved = []
-        for rank, idx in enumerate(top_indices, start=1):
+        for idx in top_indices:
+            if article_ids[idx] == source_id:
+                continue
             retrieved.append({
                 "article_id": article_ids[idx],
                 "score": float(scores[idx]),
-                "rank": rank,
+                "rank": len(retrieved) + 1,
             })
+            if len(retrieved) == top_k:
+                break
 
         results.append({
             "query_id": rec["query_id"],
@@ -92,7 +110,10 @@ def retrieve_tfidf(
     top_k: int,
     preprocessing: str = "raw",
 ) -> list[dict]:
-    """Run TF-IDF retrieval for all queries for a given query version."""
+    """Run TF-IDF retrieval for all queries for a given query version.
+
+    The source article is excluded from results for the same reason as BM25.
+    """
     from article_retrieval.article_index import _preprocess_text
 
     version_key = f"v{version}"
@@ -114,11 +135,19 @@ def retrieve_tfidf(
 
     results = []
     for rec, scores in zip(filtered_records, scores_matrix):
-        top_indices = np.argsort(scores)[::-1][:top_k]
-        retrieved = [
-            {"article_id": article_ids[idx], "score": float(scores[idx]), "rank": rank}
-            for rank, idx in enumerate(top_indices, start=1)
-        ]
+        source_id = rec.get("source_article_id")
+        top_indices = np.argsort(scores)[::-1][:top_k + 1]
+        retrieved = []
+        for idx in top_indices:
+            if article_ids[idx] == source_id:
+                continue
+            retrieved.append({
+                "article_id": article_ids[idx],
+                "score": float(scores[idx]),
+                "rank": len(retrieved) + 1,
+            })
+            if len(retrieved) == top_k:
+                break
         results.append({
             "query_id": rec["query_id"],
             "gold_article_id": rec["gold_article_id"],
@@ -145,25 +174,33 @@ def retrieve_dense(
     """
     Run dense retrieval for all queries for a given (model, query version).
     query_embeddings must match query_records order.
+
+    The source article is excluded from results for the same reason as BM25.
     """
     # L2-normalise query vectors to match how FAISS index was built
     norms = np.linalg.norm(query_embeddings, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1, norms)
     normed = (query_embeddings / norms).astype(np.float32)
 
-    scores_batch, indices_batch = faiss_index.search(normed, top_k)
+    # Retrieve one extra to absorb the source article exclusion
+    scores_batch, indices_batch = faiss_index.search(normed, top_k + 1)
 
     results = []
     for rec, scores, indices in zip(query_records, scores_batch, indices_batch):
+        source_id = rec.get("source_article_id")
         retrieved = []
-        for rank, (idx, score) in enumerate(zip(indices, scores), start=1):
+        for idx, score in zip(indices, scores):
             if idx < 0 or idx >= len(article_ids):
+                continue
+            if article_ids[idx] == source_id:
                 continue
             retrieved.append({
                 "article_id": article_ids[idx],
                 "score": float(score),
-                "rank": rank,
+                "rank": len(retrieved) + 1,
             })
+            if len(retrieved) == top_k:
+                break
         results.append({
             "query_id": rec["query_id"],
             "gold_article_id": rec["gold_article_id"],

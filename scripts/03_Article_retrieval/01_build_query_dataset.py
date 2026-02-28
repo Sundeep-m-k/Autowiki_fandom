@@ -60,7 +60,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Rebuild even if cached.")
     args = parser.parse_args()
 
-    config  = cu.load_config(ROOT / args.config)
+    config  = cu.resolve_config(cu.load_config(ROOT / args.config))
     domains = [args.domain] if args.domain else config.get("domains", [])
 
     for domain in domains:

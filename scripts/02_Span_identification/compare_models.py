@@ -16,24 +16,40 @@ from src.span_identification.stats import bootstrap_significance
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare span_id systems with significance testing")
-    parser.add_argument("--csv", type=str, default="data/research/span_id_experiments.csv")
+    parser.add_argument("--csv", type=str, default="data/research/span_id_experiments.csv",
+                        help="Path to CSV, or parent research dir to auto-discover domain subdirs")
     parser.add_argument("--run-id", type=str, help="Filter to this run_id")
+    parser.add_argument("--domain", type=str, help="Filter to a single domain")
     parser.add_argument("--baseline", type=str, default="rule_capitalized")
     parser.add_argument("--model", type=str, default="bert-base-uncased")
     parser.add_argument("--metric", type=str, default="span_f1")
     args = parser.parse_args()
 
     csv_path = PROJECT_ROOT / args.csv
-    if not csv_path.exists():
-        print(f"CSV not found: {csv_path}")
-        return
 
+    # Collect rows from domain-scoped subdirectories when flat file doesn't exist
     rows = []
-    with open(csv_path) as f:
-        for r in csv.DictReader(f):
-            if args.run_id and r.get("run_id") != args.run_id:
-                continue
-            rows.append(r)
+    if csv_path.exists():
+        candidate_csvs = [csv_path]
+    else:
+        csv_name = csv_path.name
+        parent = csv_path.parent
+        candidate_csvs = sorted(
+            d / csv_name for d in parent.iterdir()
+            if d.is_dir() and (d / csv_name).exists()
+        )
+        if not candidate_csvs:
+            print(f"CSV not found: {csv_path}")
+            return
+
+    for cpath in candidate_csvs:
+        with open(cpath) as f:
+            for r in csv.DictReader(f):
+                if args.domain and r.get("domain") != args.domain:
+                    continue
+                if args.run_id and r.get("run_id") != args.run_id:
+                    continue
+                rows.append(r)
 
     # Group by (domain, granularity)
     def key(r):

@@ -1,0 +1,37 @@
+{
+  "domain": "harrypotter",
+  "updated_at": "2026-02-26T16:59:38.546864",
+  "scraping": {
+    "total_urls": 36793,
+    "downloaded": 24372,
+    "skipped": 12395,
+    "failed": 26,
+    "html_bytes": {
+      "total": 6834586063,
+      "avg": 280427.7885688495,
+      "max": 1918418
+    },
+    "text_bytes": {
+      "total": 89989685,
+      "avg": 3692.3389545379946,
+      "max": 499880
+    }
+  },
+  "dataset_stats": {
+    "num_articles": 24372,
+    "num_paragraphs": 127776,
+    "num_sentences": 315322,
+    "num_links": 2661666,
+    "link_type_counts": {
+      "internal": 2095811,
+      "other": 505149,
+      "external": 22579,
+      "file": 38127
+    },
+    "avg_article_length_chars": 4695,
+    "max_article_length_chars": 497061,
+    "avg_internal_links_per_article": 85.99,
+    "num_articles_with_no_internal_links": 25,
+    "updated_at": "2026-02-28T01:55:28.031958"
+  }
+}

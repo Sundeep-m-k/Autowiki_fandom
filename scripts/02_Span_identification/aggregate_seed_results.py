@@ -12,27 +12,42 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate span_id results across seeds")
-    parser.add_argument("--csv", type=str, default="data/research/span_id_experiments.csv")
+    parser.add_argument("--csv", type=str, default="data/research/span_id_experiments.csv",
+                        help="Path to CSV, or parent research dir to auto-discover domain subdirs")
     parser.add_argument("--out", type=str, default="data/research/span_id_experiments_aggregated.csv")
+    parser.add_argument("--domain", type=str, help="Filter to a single domain")
     parser.add_argument("--run-id", type=str, help="Filter to this run_id only")
     args = parser.parse_args()
 
     csv_path = PROJECT_ROOT / args.csv
     out_path = PROJECT_ROOT / args.out
 
-    if not csv_path.exists():
-        print(f"Input CSV not found: {csv_path}")
-        return
-
+    # Collect rows from domain-scoped subdirectories when flat file doesn't exist
     rows = []
-    with open(csv_path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if args.run_id and row.get("run_id") != args.run_id:
-                continue
-            if row.get("experiment_type") != "model":
-                continue
-            rows.append(row)
+    if csv_path.exists():
+        candidate_csvs = [csv_path]
+    else:
+        csv_name = csv_path.name
+        parent = csv_path.parent
+        candidate_csvs = sorted(
+            d / csv_name for d in parent.iterdir()
+            if d.is_dir() and (d / csv_name).exists()
+        )
+        if not candidate_csvs:
+            print(f"Input CSV not found: {csv_path}")
+            return
+
+    for cpath in candidate_csvs:
+        with open(cpath) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if args.domain and row.get("domain") != args.domain:
+                    continue
+                if args.run_id and row.get("run_id") != args.run_id:
+                    continue
+                if row.get("experiment_type") != "model":
+                    continue
+                rows.append(row)
 
     # Group by (domain, granularity, model, data_fraction)
     groups = defaultdict(list)

@@ -51,9 +51,10 @@ def main() -> None:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info("[main] run_id=%s", run_id)
 
-    research_csv = get_research_csv_path(config)
-    research_csv.parent.mkdir(parents=True, exist_ok=True)
-    log.info("[main] research_csv=%s", research_csv)
+    def get_domain_csv(domain: str):
+        p = get_research_csv_path(config, domain)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
 
     fieldnames = [
         "run_id", "timestamp", "seed", "experiment_type",
@@ -65,14 +66,16 @@ def main() -> None:
     # Dedup key for baselines: (experiment_type, granularity, domain, model).
     # Two baseline runs with the same key are identical (deterministic) — keep only the first.
     _baseline_seen: set[tuple] = set()
-    if research_csv.exists() and research_csv.stat().st_size > 0:
-        with open(research_csv, newline="") as _f:
-            for _row in csv.DictReader(_f):
-                if _row.get("experiment_type") == "baseline":
-                    _baseline_seen.add(
-                        (_row["experiment_type"], _row["granularity"],
-                         _row["domain"], _row["model"])
-                    )
+    for _domain in domains:
+        _csv = get_domain_csv(_domain)
+        if _csv.exists() and _csv.stat().st_size > 0:
+            with open(_csv, newline="") as _f:
+                for _row in csv.DictReader(_f):
+                    if _row.get("experiment_type") == "baseline":
+                        _baseline_seen.add(
+                            (_row["experiment_type"], _row["granularity"],
+                             _row["domain"], _row["model"])
+                        )
 
     def append_row(row: dict) -> None:
         if row.get("experiment_type") == "baseline":
@@ -80,6 +83,7 @@ def main() -> None:
             if key in _baseline_seen:
                 return
             _baseline_seen.add(key)
+        research_csv = get_domain_csv(row["domain"])
         write_header = not research_csv.exists() or research_csv.stat().st_size == 0
         with open(research_csv, "a", newline="") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
@@ -255,9 +259,9 @@ def main() -> None:
                             )
 
     for domain in domains:
-        update_span_id_stats(domain, research_csv)
+        update_span_id_stats(domain, get_domain_csv(domain))
 
-    log.info("[main] run complete. Results appended to %s", research_csv)
+    log.info("[main] run complete. Results saved to %s/<domain>/", config["research_dir"])
 
 
 if __name__ == "__main__":

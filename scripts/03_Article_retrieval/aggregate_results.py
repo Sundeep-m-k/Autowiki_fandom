@@ -22,11 +22,23 @@ import article_retrieval.config_utils as cu
 
 
 def load_research_csv(path: Path) -> list[dict]:
-    if not path.exists():
+    """Load rows from a single CSV, or from all domain subdirectories if path doesn't exist."""
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+    # Try loading from per-domain subdirectories
+    csv_name = path.name
+    parent = path.parent
+    rows: list[dict] = []
+    if parent.exists():
+        for domain_dir in sorted(parent.iterdir()):
+            domain_csv = domain_dir / csv_name
+            if domain_dir.is_dir() and domain_csv.exists():
+                with open(domain_csv, encoding="utf-8") as f:
+                    rows.extend(csv.DictReader(f))
+    if not rows:
         print(f"Research CSV not found: {path}")
-        return []
-    with open(path, encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    return rows
 
 
 def print_table(rows: list[dict], title: str, top: int = 30) -> None:
@@ -69,7 +81,7 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=30, help="Number of top rows to print.")
     args = parser.parse_args()
 
-    config   = cu.load_config(ROOT / args.config)
+    config   = cu.resolve_config(cu.load_config(ROOT / args.config))
     csv_path = cu.get_research_csv_path(config)
     rows     = load_research_csv(csv_path)
 

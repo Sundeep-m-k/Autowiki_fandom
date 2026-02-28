@@ -304,9 +304,9 @@ def main() -> None:
     parser.add_argument("--no-show", action="store_true", help="Save only, do not show plots.")
     args = parser.parse_args()
 
-    config   = cu.load_config(ROOT / args.config)
-    csv_path = cu.get_research_csv_path(config)
+    config   = cu.resolve_config(cu.load_config(ROOT / args.config))
     domain   = args.domain or config.get("domains", [None])[0]
+    csv_path = cu.get_research_csv_path(config, domain)
     out_dir  = Path(config.get("article_retrieval_dir", "data/article_retrieval")) / domain / "plots"
     show     = not args.no_show
 

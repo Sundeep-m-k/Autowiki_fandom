@@ -1,12 +1,11 @@
 # Base span identification config — shared defaults for all machines/environments.
-# Machine-specific configs (span_id_skanda.yaml, span_id_kudremukh.yaml) import
-# this via the `base:` key and only override what differs.
+# Machine-specific configs (kudremukh.yaml, skanda.yaml) and task configs (span_id.yaml,
+# error_analysis.yaml) inherit this via the `base:` key and override only what differs.
 
 # Base paths (relative to project root)
 data_dir: "data"
 span_id_dir: "data/span_id"
 processed_dir: "data/processed"
-checkpoint_dir: "data/checkpoints"
 research_dir: "data/research"
 log_dir: "data/logs"
 splits_subdir: "splits"
@@ -53,12 +52,9 @@ fix_random_seeds: true
 
 checkpoint:
   save_every_epoch: true
-  selection: ["best_val_f1", "last"]
 
 run_baselines: true
 baselines: ["rule_capitalized", "heuristic_anchor", "random"]
 data_fractions: [1.0]
-transfer_experiments: false
-metrics: ["span_f1", "char_f1", "exact_match_pct", "overlap_f1"]
 
 research_csv: "span_id_experiments.csv"

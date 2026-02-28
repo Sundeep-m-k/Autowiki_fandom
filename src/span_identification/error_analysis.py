@@ -203,18 +203,25 @@ def find_checkpoints(
     """
     Locate the best-model checkpoint directory produced by train_and_evaluate.
 
-    The naming convention mirrors what the run scripts write:
+    Two naming conventions are tried (newer convention first):
       <ckpt_root>/<granularity>_<domain>_<model>_<scheme>_seed<seed>_frac<frac>/
+
+    Older BILOU runs omitted the label scheme from the directory name:
+      <ckpt_root>/<granularity>_<domain>_<model>_seed<seed>_frac<frac>/
 
     Returns the path if it exists, otherwise None.
     """
     safe_model = model_name.replace("/", "_")
     frac_str = f"{frac:.1f}" if frac == int(frac) else str(frac)
-    sub = ckpt_root / f"{granularity}_{domain}_{safe_model}_{label_scheme}_seed{seed}_frac{frac_str}"
-    if sub.exists():
-        return sub
-    # Also try without trailing .0 on frac
-    alt = ckpt_root / f"{granularity}_{domain}_{safe_model}_{label_scheme}_seed{seed}_frac{frac}"
-    if alt.exists():
-        return alt
+
+    candidates = [
+        ckpt_root / f"{granularity}_{domain}_{safe_model}_{label_scheme}_seed{seed}_frac{frac_str}",
+        ckpt_root / f"{granularity}_{domain}_{safe_model}_{label_scheme}_seed{seed}_frac{frac}",
+        # Older runs (pre-BIO) stored BILOU checkpoints without the scheme in the name.
+        ckpt_root / f"{granularity}_{domain}_{safe_model}_seed{seed}_frac{frac_str}",
+        ckpt_root / f"{granularity}_{domain}_{safe_model}_seed{seed}_frac{frac}",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
     return None

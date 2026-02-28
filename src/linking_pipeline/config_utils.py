@@ -71,8 +71,13 @@ def get_log_dir(config: dict, domain: str) -> Path:
     return Path(config.get("log_dir", "data/logs")) / domain / "linking"
 
 
-def get_research_csv_path(config: dict) -> Path:
-    return Path(config["research_dir"]) / config.get("research_csv", "linking_experiments.csv")
+def get_research_csv_path(config: dict, domain: str = "") -> Path:
+    """Research experiments CSV, scoped to a domain subdirectory if provided."""
+    base = Path(config["research_dir"])
+    csv_name = config.get("research_csv", "linking_experiments.csv")
+    if domain:
+        return base / domain / csv_name
+    return base / csv_name
 
 
 # ── Task 1 path helpers ────────────────────────────────────────────────────────
