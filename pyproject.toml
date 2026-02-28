@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",
     "nltk",
     "numpy",
+    "mwparserfromhell>=0.6",
 ]
 
 [tool.setuptools.packages.find]

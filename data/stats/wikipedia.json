@@ -1,0 +1,17 @@
+{
+  "domain": "wikipedia",
+  "dataset_stats": {
+    "num_articles": 21009,
+    "num_paragraphs": 912357,
+    "num_sentences": 3148806,
+    "num_links": 3636342,
+    "link_type_counts": {
+      "internal": 3636342
+    },
+    "avg_article_length_chars": 24142,
+    "max_article_length_chars": 608208,
+    "avg_internal_links_per_article": 173.08,
+    "num_articles_with_no_internal_links": 82,
+    "updated_at": "2026-02-28T05:49:07.808845"
+  }
+}
