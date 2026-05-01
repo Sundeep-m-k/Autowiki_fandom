@@ -14,7 +14,7 @@ span_id_dir: "data/span_id"
 splits_subdir: "splits"
 
 # ── Exp 8: Domains ─────────────────────────────────────────────────────────────
-domains: ["money-heist"]
+domains: ["harrypotter"]
 
 # ── Article Index ──────────────────────────────────────────────────────────────
 article_index:
@@ -22,8 +22,8 @@ article_index:
   # Exp 3: Corpus representation — what text is stored per article.
   corpus_representations:
     - "title_full"        # title + full article text (default, best signal)
-    - "title_only"        # title string only
-    - "title_lead"        # title + first paragraph only
+    # - "title_only"        # title string only
+    # - "title_lead"        # title + first paragraph only
 
   # Maximum characters of article text to include (after title).
   max_chars: 2000
@@ -32,33 +32,33 @@ article_index:
   # Note: paragraph/sentence require deduplication at eval time.
   corpus_granularities:
     - "article"           # one entry per article (default)
-    - "paragraph"         # one entry per paragraph
-    - "sentence"          # one entry per sentence
+    # - "paragraph"         # one entry per paragraph
+    # - "sentence"          # one entry per sentence
 
 # ── Queries ────────────────────────────────────────────────────────────────────
 queries:
 
   # Exp 9: Query sample sizes.
   # Each value generates a separate query dataset. null means use all links.
-  n_samples: [1000, null]
+  n_samples: [null]
   stratify_by: "source_article_id"
   split: "test"
 
   # Exp 1: Query versions — all 24 variations from the pipeline.
-  versions: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24]
+  versions: [10,12,15]
 
   # Exp 4: Query-side context — how much surrounding text is included in the query.
   query_context_modes:
     - "anchor_sentence"   # anchor + surrounding sentence (default)
-    - "anchor_only"       # anchor text only
-    - "anchor_paragraph"  # anchor + full paragraph
+    # - "anchor_only"       # anchor text only
+    # - "anchor_paragraph"  # anchor + full paragraph
 
   # Exp 11: Anchor text preprocessing.
   # raw is default; lowercase/stopword_removed matter most for BM25/TF-IDF.
   anchor_preprocessings:
     - "raw"
-    - "lowercase"
-    - "stopword_removed"
+    # - "lowercase"
+    # - "stopword_removed"
 
 # ── Retrievers (Exp 2) ─────────────────────────────────────────────────────────
 retrievers:
@@ -68,8 +68,8 @@ retrievers:
   dense:
     - "sentence-transformers/all-mpnet-base-v2"
     - "sentence-transformers/all-MiniLM-L6-v2"
-    - "sentence-transformers/msmarco-distilbert-base-v4"
-    - "roberta-base"
+    # - "sentence-transformers/msmarco-distilbert-base-v4"
+    # - "roberta-base"
 
 retrieval:
   top_k: 100
@@ -85,8 +85,8 @@ reranking:
   # Exp 6: Re-ranker models.
   models:
     - "cross-encoder/ms-marco-MiniLM-L-6-v2"   # fast, strong zero-shot (default)
-    - "cross-encoder/ms-marco-MiniLM-L-12-v2"  # larger
-    - "cross-encoder/ms-marco-electra-base"     # stronger
+    # - "cross-encoder/ms-marco-MiniLM-L-12-v2"  # larger
+    # - "cross-encoder/ms-marco-electra-base"     # stronger
 
   # Exp 7: Re-ranker input size — top-K from retriever fed to re-ranker.
   top_k_inputs: [5, 10, 20, 50]

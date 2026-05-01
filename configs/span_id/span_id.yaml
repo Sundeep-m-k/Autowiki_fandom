@@ -10,6 +10,3 @@ domains: ["money-heist"]
 # and reduce batch_size accordingly (memory scales with sequence length).
 models:
   - "bert-base-uncased"
-  - "microsoft/deberta-v3-base"
-  - "roberta-base"
-  - "distilbert-base-uncased"

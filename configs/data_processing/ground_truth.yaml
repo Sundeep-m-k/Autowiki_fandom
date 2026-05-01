@@ -1,5 +1,5 @@
 # Ground truth build config
-domain: "harrypotter"
+domain: "disney"
 raw_dir: "data/raw"
 processed_dir: "data/processed"
 
