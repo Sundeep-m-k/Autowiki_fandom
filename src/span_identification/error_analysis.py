@@ -3,6 +3,9 @@
 Works for both baselines (which already expose per-example gold/pred spans)
 and trained HF models (via ``predict_from_checkpoint`` in hf_trainer.py,
 which decodes token-level predictions back to char-level spans).
+
+Structured categorization (v2) lives in ``error_categorization.py`` (greedy IoU
+matching + exact / boundary_shift / overlap_confusion / spurious / missed).
 """
 from __future__ import annotations
 
@@ -10,6 +13,12 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from src.span_identification.error_categorization import (
+    aggregate_categorization,
+    categorize_example,
+    sample_stratified,
+)
 
 
 def categorize_errors(
@@ -91,23 +100,112 @@ def save_error_analysis(
     summary: dict,
     fp_samples: list[dict],
     fn_samples: list[dict],
+    detail_records: list[dict] | None = None,
+    stratified_samples: list[dict] | None = None,
 ) -> None:
-    """Save error analysis to JSON/JSONL files."""
+    """Save error analysis to JSON/JSONL files.
+
+    Always writes ``errors_summary.json``, ``fp_samples.jsonl``, ``fn_samples.jsonl``.
+    When ``detail_records`` is set, also writes ``errors_detail.jsonl`` (one record
+    per matched pair, spurious pred, or missed gold).
+    When ``stratified_samples`` is set, writes ``samples_stratified.jsonl``.
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(output_dir / "errors_summary.json", "w") as f:
+    with open(output_dir / "errors_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
-    with open(output_dir / "fp_samples.jsonl", "w") as f:
+    with open(output_dir / "fp_samples.jsonl", "w", encoding="utf-8") as f:
         for s in fp_samples:
-            f.write(json.dumps(s) + "\n")
-    with open(output_dir / "fn_samples.jsonl", "w") as f:
+            f.write(json.dumps(s, ensure_ascii=False) + "\n")
+    with open(output_dir / "fn_samples.jsonl", "w", encoding="utf-8") as f:
         for s in fn_samples:
-            f.write(json.dumps(s) + "\n")
+            f.write(json.dumps(s, ensure_ascii=False) + "\n")
+    if detail_records is not None:
+        with open(output_dir / "errors_detail.jsonl", "w", encoding="utf-8") as f:
+            for r in detail_records:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if stratified_samples is not None:
+        with open(output_dir / "samples_stratified.jsonl", "w", encoding="utf-8") as f:
+            for r in stratified_samples:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------------------
 # Model-level error analysis
 # ---------------------------------------------------------------------------
+
+def aggregate_legacy_and_categorization(
+    examples: list[dict[str, Any]],
+    iou_threshold: float,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """
+    Build legacy exact-match totals + v2 categorization for a list of examples
+    with keys ``text``, ``gold_spans``, ``pred_spans``, optional ``unit_id``.
+    Returns (summary_dict, detail_records).
+    """
+    total: dict[str, Any] = {
+        "tp_count": 0, "fp_count": 0, "fn_count": 0,
+        "fp_avg_len": 0.0, "fn_avg_len": 0.0,
+        "fp_short": 0, "fp_long": 0,
+        "fn_short": 0, "fn_long": 0,
+        "num_examples": len(examples),
+        "num_examples_with_gold": 0,
+    }
+    all_fp_lens: list[int] = []
+    all_fn_lens: list[int] = []
+
+    for ex in examples:
+        stats = categorize_errors(ex["gold_spans"], ex.get("pred_spans", []))
+        for key in ("tp_count", "fp_count", "fn_count",
+                    "fp_short", "fp_long", "fn_short", "fn_long"):
+            total[key] += stats[key]
+        gs, ps = ex["gold_spans"], ex.get("pred_spans", [])
+        gold_set = {tuple(s) for s in gs}
+        pred_set = {tuple(s) for s in ps}
+        all_fp_lens.extend(s[1] - s[0] for s in pred_set - gold_set)
+        all_fn_lens.extend(s[1] - s[0] for s in gold_set - pred_set)
+        if ex["gold_spans"]:
+            total["num_examples_with_gold"] += 1
+
+    total["fp_avg_len"] = sum(all_fp_lens) / len(all_fp_lens) if all_fp_lens else 0.0
+    total["fn_avg_len"] = sum(all_fn_lens) / len(all_fn_lens) if all_fn_lens else 0.0
+
+    tp = total["tp_count"]
+    fp = total["fp_count"]
+    fn = total["fn_count"]
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    total["precision"] = precision
+    total["recall"] = recall
+    total["span_f1"] = f1
+
+    per_ex: list[dict[str, Any]] = []
+    for ex in examples:
+        per_ex.append(
+            categorize_example(
+                ex["text"],
+                ex["gold_spans"],
+                ex.get("pred_spans", []),
+                iou_threshold=iou_threshold,
+                unit_id=ex.get("unit_id"),
+            )
+        )
+    agg = aggregate_categorization(per_ex)
+    cat_counts = agg["counts"]
+    detail_records = agg["records"]
+
+    summary_out = {
+        **total,
+        "categorization": {
+            "version": "2",
+            "iou_threshold": iou_threshold,
+            "matching": "greedy_iou",
+            "counts": cat_counts,
+        },
+    }
+    return summary_out, detail_records
+
 
 def run_model_error_analysis(
     checkpoint_dir: Path,
@@ -120,15 +218,17 @@ def run_model_error_analysis(
     max_fp: int = 50,
     max_fn: int = 50,
     seed: int = 42,
+    iou_threshold: float = 0.5,
+    max_stratified_samples: int = 15,
 ) -> dict[str, Any]:
     """
     Run full error analysis for a single trained checkpoint.
 
     Loads the model, predicts on the test split, decodes to char spans,
-    aggregates summary statistics, samples FP/FN examples, and saves everything
-    under ``output_dir``.
+    aggregates summary statistics (legacy exact-match + v2 categorization),
+    samples FP/FN examples, and saves everything under ``output_dir``.
 
-    Returns the summary dict.
+    Returns the summary dict (includes ``categorization`` with v2 counts).
     """
     from src.span_identification.hf_trainer import predict_from_checkpoint
 
@@ -144,51 +244,34 @@ def run_model_error_analysis(
         batch_size=batch_size,
     )
 
-    # Aggregate statistics across all examples
-    total: dict[str, Any] = {
-        "tp_count": 0, "fp_count": 0, "fn_count": 0,
-        "fp_avg_len": 0.0, "fn_avg_len": 0.0,
-        "fp_short": 0, "fp_long": 0,
-        "fn_short": 0, "fn_long": 0,
-        "num_examples": len(examples),
-        "num_examples_with_gold": 0,
-    }
-    all_fp_lens: list[int] = []
-    all_fn_lens: list[int] = []
-
-    for ex in examples:
-        stats = categorize_errors(ex["gold_spans"], ex["pred_spans"])
-        for key in ("tp_count", "fp_count", "fn_count",
-                    "fp_short", "fp_long", "fn_short", "fn_long"):
-            total[key] += stats[key]
-        all_fp_lens.extend([s[1] - s[0] for s in ex["pred_spans"]
-                             if list(s) not in ex["gold_spans"]])
-        all_fn_lens.extend([s[1] - s[0] for s in ex["gold_spans"]
-                             if list(s) not in ex["pred_spans"]])
-        if ex["gold_spans"]:
-            total["num_examples_with_gold"] += 1
-
-    total["fp_avg_len"] = sum(all_fp_lens) / len(all_fp_lens) if all_fp_lens else 0.0
-    total["fn_avg_len"] = sum(all_fn_lens) / len(all_fn_lens) if all_fn_lens else 0.0
-
-    tp = total["tp_count"]
-    fp = total["fp_count"]
-    fn = total["fn_count"]
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall    = tp / (tp + fn) if (tp + fn) else 0.0
-    f1        = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    total["precision"] = precision
-    total["recall"]    = recall
-    total["span_f1"]   = f1
+    summary_out, detail_records = aggregate_legacy_and_categorization(
+        examples, iou_threshold=iou_threshold,
+    )
+    tp = summary_out["tp_count"]
+    fp = summary_out["fp_count"]
+    fn = summary_out["fn_count"]
+    precision = summary_out["precision"]
+    recall = summary_out["recall"]
+    f1 = summary_out["span_f1"]
+    cat_counts = summary_out["categorization"]["counts"]
 
     fp_samples, fn_samples = sample_errors(examples, max_fp=max_fp, max_fn=max_fn, seed=seed)
-    save_error_analysis(output_dir, total, fp_samples, fn_samples)
+    strat = sample_stratified(detail_records, max_per_category=max_stratified_samples, seed=seed)
+    save_error_analysis(
+        output_dir,
+        summary_out,
+        fp_samples,
+        fn_samples,
+        detail_records=detail_records,
+        stratified_samples=strat,
+    )
 
     log.info(
-        "[error_analysis] P=%.3f R=%.3f F1=%.3f  FP=%d FN=%d  saved to %s",
-        precision, recall, f1, fp, fn, output_dir,
+        "[error_analysis] P=%.3f R=%.3f F1=%.3f  FP=%d FN=%d  "
+        "cat=%s  saved to %s",
+        precision, recall, f1, fp, fn, cat_counts, output_dir,
     )
-    return total
+    return summary_out
 
 
 def find_checkpoints(

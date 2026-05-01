@@ -118,6 +118,20 @@ combination, with skip logic (cached artifacts are not recomputed).
 | 10 | FAISS index type | `faiss_index_type` | `flat` (ivf/hnsw — future) |
 | 11 | Anchor preprocessing | `queries.anchor_preprocessings` | `raw`, `lowercase`, `stopword_removed` |
 
+### Corpus representation (Exp 3)
+
+Exp 3 controls **what text is indexed per article** for retrieval. Implemented in
+`article_index.py` → `_build_article_text()`.
+
+| Option | What gets indexed | Implementation |
+|--------|--------------------|----------------|
+| `title_only` | Article title only | Returns `title` from the article record. |
+| `title_lead` | Title + lead text | Title + first 500 characters of `article_plain_text`. |
+| `title_full` | Title + full article body | Title + full `article_plain_text`, truncated to `max_chars` (default 2000). |
+
+The body text comes from `article_plain_text` in `articles_page_granularity_<domain>.jsonl`,
+which is the concatenation of all paragraph texts from the ground truth.
+
 Standalone sub-scripts (`02_run_retrieval.py`, etc.) call `cu.resolve_config()` which
 picks the first ablation combination as the default — so they work correctly when run
 directly with a base config.

@@ -3,7 +3,7 @@
 # Only override what is specific to error analysis here.
 base: "base.yaml"
 
-domains: ["money-heist"]
+domains: ["naruto"]
 
 error_analysis:
   # Maximum number of FP / FN example records to sample and save to JSONL.
@@ -11,8 +11,12 @@ error_analysis:
   max_fn_samples: 50
   # Random seed for the sample (ensures reproducible output).
   seed: 42
+  # v2 categorization: minimum IoU for greedy matching; pairs below are unmatched.
+  iou_threshold: 0.5
+  # Per (record_type, category) bucket in samples_stratified.jsonl
+  max_stratified_samples: 15
   # Which experiment types to run.
-  #   "baseline" — uses in-memory baseline runners on the validation split.
+  #   "baseline" — in-memory baselines on the **test** split (same as model EA).
   #   "model"    — loads a saved checkpoint and runs inference on the test split.
   experiments:
     - experiment_type: "baseline"

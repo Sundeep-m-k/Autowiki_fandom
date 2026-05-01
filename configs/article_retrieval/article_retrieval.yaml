@@ -3,4 +3,4 @@
 # Override only what differs for this machine/experiment.
 base: "base.yaml"
 
-domains: ["money-heist"]
+domains: ["naruto"]

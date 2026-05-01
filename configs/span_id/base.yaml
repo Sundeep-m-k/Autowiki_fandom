@@ -47,7 +47,7 @@ model:
   max_length: 512
   dropout: 0.1
 
-seeds: [42, 123, 456]
+seeds: [42] #42, 123, 456
 fix_random_seeds: true
 
 checkpoint:

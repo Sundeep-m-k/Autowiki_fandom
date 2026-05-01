@@ -2,7 +2,7 @@
 # Inherits all defaults from span_id_base.yaml and overrides only what differs.
 base: "base.yaml"
 
-domains: ["money-heist"]
+domains: ["naruto"]
 
 # 6-model sweep. Note: Longformer supports up to 4096 tokens but runs fine at
 # max_length: 512 for sentence/paragraph granularities. If you want to exploit
@@ -10,6 +10,6 @@ domains: ["money-heist"]
 # and reduce batch_size accordingly (memory scales with sequence length).
 models:
   - "bert-base-uncased"
-  - "microsoft/deberta-v3-base"
-  - "roberta-base"
-  - "distilbert-base-uncased"
+  # - "microsoft/deberta-v3-base"
+  # - "roberta-base"
+  # - "distilbert-base-uncased"

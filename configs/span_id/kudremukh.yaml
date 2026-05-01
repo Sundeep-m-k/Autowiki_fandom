@@ -4,10 +4,10 @@
 # Inherits all defaults from span_id_base.yaml and overrides only what differs.
 base: "base.yaml"
 
-domains: ["money-heist"]
+domains: ["naruto"]
 
 models:
   - "bert-base-uncased"
-  - "microsoft/deberta-v3-base"
-  - "roberta-base"
-  - "distilbert-base-uncased"
+  # - "microsoft/deberta-v3-base"
+  # - "roberta-base"
+  # - "distilbert-base-uncased"

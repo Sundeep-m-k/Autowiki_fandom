@@ -1,0 +1,42 @@
+%% Autowiki — Figure 1: End-to-end system overview (research paper)
+%% Render: npx @mermaid-js/mermaid-cli -i figure_01_end_to_end.mmd -o figure_01_end_to_end.pdf
+
+flowchart TB
+  subgraph Sources["Corpus acquisition"]
+    F["Fandom wiki\n(MediaWiki API + HTML scrape)"]
+    W["Wikipedia\n(versioned XML dump)"]
+  end
+
+  subgraph T0["Task 0 — Dataset preprocessing / ground truth"]
+    F --> S0["Scrape → raw HTML\ndata/raw/domain/"]
+    S0 --> G0["Parse HTML → internal links +\nchar spans in plain text"]
+    W --> G1["Stream XML pages → mwparserfromhell\nWikilink → plain text + offsets"]
+    G0 --> P["Processed corpus JSONL/CSV\ndata/processed/domain/\n(articles, paragraphs, sentences)"]
+    G1 --> P
+    P --> ST["Dataset statistics\ndata/stats/domain.json"]
+  end
+
+  subgraph T1["Task 1 — Span identification"]
+    P --> U["Units + gold link spans\n(sentence / paragraph / article)"]
+    U --> TOK["Tokenize + BILOU labels +\ntrain/val/test splits"]
+    TOK --> M1["Token classifier\n(HF Trainer, early stop on val span F1)"]
+    M1 --> A1["Checkpoints + metrics\ndata/span_id/… + span_id_experiments.csv"]
+  end
+
+  subgraph T2["Task 2 — Article retrieval (IR)"]
+    P --> IDX["Corpus indexes\nBM25 / TF-IDF / dense + FAISS"]
+    P --> Q["Query dataset from gold anchors\n(context + preprocessing variants)"]
+    Q --> RET["First-stage retrieval\ntop-K candidates per query"]
+    RET --> RR["Cross-encoder reranking\n(+ optional mined hard-neg training)"]
+    IDX --> RET
+    RR --> A2["Cached JSONL results +\narticle_retrieval_experiments.csv"]
+  end
+
+  subgraph T3["Task 3 — Linking pipeline (composition + render)"]
+    A1 --> L0["Span source\n(gold test spans and/or predicted spans)"]
+    A2 --> L1["Lookup table\n(source_article_id, anchor_text) → (target_id, score)"]
+    L0 --> NIL["NIL / abstain via score threshold"]
+    L1 --> NIL
+    NIL --> HTML["HTML rendering:\ninject internal hyperlinks"]
+    HTML --> EVAL["Linking metrics + HTML artifacts\ndata/linking/… + linking_experiments.csv"]
+  end

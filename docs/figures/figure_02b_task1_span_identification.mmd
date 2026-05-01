@@ -1,0 +1,9 @@
+%% Panel B — Task 1: Span identification
+%% Render: npx @mermaid-js/mermaid-cli -i figure_02b_task1_span_identification.mmd -o figure_02b_task1_span_identification.pdf
+
+flowchart TB
+  IN["Processed JSONL\n(paragraph / sentence / article)"] --> SPL["Article-ID–consistent splits"]
+  SPL --> LAB["Overlap-based token labels\n(BILOU)"]
+  LAB --> TR["Train AutoModelForTokenClassification"]
+  TR --> DEC["Label decode → token spans\n→ char spans (offset mapping)"]
+  DEC --> MET["Span-F1 / token-F1 /\nbaselines on same splits"]

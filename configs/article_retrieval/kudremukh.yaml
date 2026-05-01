@@ -3,7 +3,7 @@
 # Inherits all experiment dimensions from base.yaml. Only compute settings differ.
 base: "base.yaml"
 
-domains: ["money-heist"]
+domains: ["naruto"]
 
 parallel:
   n_workers: 16          # 16 workers — 1 per physical core group

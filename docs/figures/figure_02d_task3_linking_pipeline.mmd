@@ -1,0 +1,9 @@
+%% Panel D — Task 3: Linking pipeline
+%% Render: npx @mermaid-js/mermaid-cli -i figure_02d_task3_linking_pipeline.mmd -o figure_02d_task3_linking_pipeline.pdf
+
+flowchart LR
+  S["Spans\n(Task 1 output)"] --> M["Match span to Task-2 row\n(key: source id + anchor)"]
+  R["Precomputed retrieval JSONL\n(Task 2 output)"] --> M
+  M --> N["NIL if low confidence"]
+  N --> H["Non-overlapping span merge\n+ HTML rendering"]
+  H --> V["End-to-end linking metrics\n+ per-article .html"]

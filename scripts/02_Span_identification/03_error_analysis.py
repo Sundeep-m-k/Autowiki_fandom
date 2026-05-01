@@ -20,14 +20,17 @@ python scripts/02_Span_identification/03_error_analysis.py --type model
 Output layout
 -------------
 data/span_id/<domain>/error_analysis/<granularity>/baseline_<name>/
-    errors_summary.json
+    errors_summary.json   (legacy exact-match metrics + categorization v2)
+    errors_detail.jsonl   (one record per matched pair / spurious / missed)
+    samples_stratified.jsonl
     fp_samples.jsonl
     fn_samples.jsonl
 
 data/span_id/<domain>/error_analysis/<granularity>/model_<safe_model>_<scheme>_seed<s>/
-    errors_summary.json
-    fp_samples.jsonl
-    fn_samples.jsonl
+    (same files)
+
+Baselines and models are evaluated on the **test** split for error analysis
+(headline metrics align with model reporting).
 """
 from __future__ import annotations
 
@@ -49,12 +52,13 @@ from src.span_identification.config_utils import (
 from src.span_identification.dataset import ensure_splits
 from src.span_identification.baselines import run_baseline
 from src.span_identification.error_analysis import (
-    categorize_errors,
+    aggregate_legacy_and_categorization,
     find_checkpoints,
     run_model_error_analysis,
     sample_errors,
     save_error_analysis,
 )
+from src.span_identification.error_categorization import sample_stratified
 from src.span_identification.logging_utils import setup_span_id_logger
 
 
@@ -88,65 +92,59 @@ def _run_baseline_analysis(
     ea_cfg: dict,
     log,
 ) -> None:
-    """Run error analysis for all configured baselines on the validation split."""
+    """Run error analysis for all configured baselines on the **test** split."""
     baselines_list = config.get("baselines", ["rule_capitalized", "heuristic_anchor", "random"])
     try:
-        _, val_ex, _ = ensure_splits(config, domain, granularity)
+        train_ex, val_ex, test_ex = ensure_splits(config, domain, granularity)
     except FileNotFoundError as e:
         log.warning("[baseline_ea] skipping %s/%s: %s", domain, granularity, e)
         return
 
+    iou_t = float(ea_cfg.get("iou_threshold", 0.5))
+    max_strat = int(ea_cfg.get("max_stratified_samples", 15))
+
     for name in baselines_list:
-        pred_val = run_baseline(name, val_ex)
-        for ex in pred_val:
+        pred_test = run_baseline(name, test_ex)
+        for ex in pred_test:
             ex.setdefault("pred_spans", [])
 
-        total_fp = total_fn = total_tp = 0
-        all_fp_lens: list[int] = []
-        all_fn_lens: list[int] = []
-        fp_short = fp_long = fn_short = fn_long = 0
-
-        for ex in pred_val:
-            cat = categorize_errors(ex["gold_spans"], ex.get("pred_spans", []))
-            total_tp += cat["tp_count"]
-            total_fp += cat["fp_count"]
-            total_fn += cat["fn_count"]
-            fp_short  += cat["fp_short"]
-            fp_long   += cat["fp_long"]
-            fn_short  += cat["fn_short"]
-            fn_long   += cat["fn_long"]
-            gold_set = set(tuple(s) for s in ex["gold_spans"])
-            pred_set = set(tuple(s) for s in ex.get("pred_spans", []))
-            all_fp_lens.extend(s[1] - s[0] for s in pred_set - gold_set)
-            all_fn_lens.extend(s[1] - s[0] for s in gold_set - pred_set)
-
-        prec = total_tp / (total_tp + total_fp) if (total_tp + total_fp) else 0.0
-        rec  = total_tp / (total_tp + total_fn) if (total_tp + total_fn) else 0.0
-        f1   = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
-
-        summary = {
-            "domain": domain, "granularity": granularity,
-            "experiment_type": "baseline", "model": name,
-            "num_examples": len(pred_val),
-            "tp_count": total_tp, "fp_count": total_fp, "fn_count": total_fn,
-            "fp_short": fp_short, "fp_long": fp_long,
-            "fn_short": fn_short, "fn_long": fn_long,
-            "fp_avg_len": sum(all_fp_lens) / len(all_fp_lens) if all_fp_lens else 0.0,
-            "fn_avg_len": sum(all_fn_lens) / len(all_fn_lens) if all_fn_lens else 0.0,
-            "precision": prec, "recall": rec, "span_f1": f1,
-        }
+        summary, detail_records = aggregate_legacy_and_categorization(
+            pred_test, iou_threshold=iou_t,
+        )
+        summary.update({
+            "domain": domain,
+            "granularity": granularity,
+            "experiment_type": "baseline",
+            "model": name,
+            "train_size": len(train_ex),
+            "val_size": len(val_ex),
+        })
 
         fp_samp, fn_samp = sample_errors(
-            pred_val,
+            pred_test,
             max_fp=ea_cfg.get("max_fp_samples", 50),
             max_fn=ea_cfg.get("max_fn_samples", 50),
             seed=ea_cfg.get("seed", 42),
         )
+        strat = sample_stratified(
+            detail_records, max_per_category=max_strat, seed=ea_cfg.get("seed", 42),
+        )
         out = error_root / domain / "error_analysis" / granularity / f"baseline_{name}"
-        save_error_analysis(out, summary, fp_samp, fn_samp)
+        save_error_analysis(
+            out,
+            summary,
+            fp_samp,
+            fn_samp,
+            detail_records=detail_records,
+            stratified_samples=strat,
+        )
         log.info(
             "[baseline_ea] %s/%s/%s  P=%.3f R=%.3f F1=%.3f  saved → %s",
-            domain, granularity, name, prec, rec, f1, out,
+            domain, granularity, name,
+            summary.get("precision", 0),
+            summary.get("recall", 0),
+            summary.get("span_f1", 0),
+            out,
         )
 
 
@@ -311,6 +309,8 @@ def _run_model_analysis(
         max_fp=ea_cfg.get("max_fp_samples", 50),
         max_fn=ea_cfg.get("max_fn_samples", 50),
         seed=ea_cfg.get("seed", 42),
+        iou_threshold=float(ea_cfg.get("iou_threshold", 0.5)),
+        max_stratified_samples=int(ea_cfg.get("max_stratified_samples", 15)),
     )
     log.info("[model_ea] saved → %s", out)
 

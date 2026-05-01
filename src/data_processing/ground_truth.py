@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString
 
@@ -31,15 +31,81 @@ LINK_SKIP_PREFIXES = (
 )
 
 
-def _extract_page_name_from_html(html: str) -> str | None:
-    """Extract wgPageName from Fandom HTML (e.g. Beverly_Hills_Cop_Wiki)."""
+def _normalise_page_slug(raw: str | None) -> str:
+    """MediaWiki-style title: trim, URL-decode, spaces → underscores."""
+    if not raw:
+        return ""
+    s = unquote(raw.strip())
+    return s.replace(" ", "_") if s else ""
+
+
+def extract_page_name_slugs_for_mapping(html: str) -> list[str]:
+    """Return ordered MediaWiki title slugs identifying this article's page.
+
+    Full Fandom pages expose ``wgPageName`` in embedded JSON; many Naruto
+    scrapes are **content-only** fragments without that metadata. Without a
+    slug, ``page_name_to_article_id`` stays empty and every internal link gets
+    ``article_id_of_internal_link: null`` (breaking article retrieval queries).
+
+    Fallbacks (in priority order):
+      1. ``wgPageName`` / ``wgRelevantPageName`` when present
+      2. Portable-infobox edit links: ``/wiki/Special:FormEdit/<Type>/<Page>``
+      3. ``/wiki/Infobox:…?action=formedit`` (and ``…`` without ``Infobox:``)
+      4. ``Special:RunQuery/Image_query`` query parameters (e.g. jutsu/character)
+      5. First opening ``<p><b>Title</b>`` (plain-text articles / technique lists)
+    """
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def push(raw: str | None) -> None:
+        slug = _normalise_page_slug(raw)
+        if not slug or len(slug) > 200 or slug in seen:
+            return
+        seen.add(slug)
+        ordered.append(slug)
+
     m = re.search(r'"wgPageName"\s*:\s*"([^"]+)"', html)
     if m:
-        return m.group(1)
+        push(m.group(1))
     m = re.search(r'"wgRelevantPageName"\s*:\s*"([^"]+)"', html)
     if m:
-        return m.group(1)
-    return None
+        push(m.group(1))
+
+    for m in re.finditer(r"/wiki/Special:FormEdit/(?:[^/]+/)+([^\"?]+)", html):
+        push(m.group(1))
+
+    for m in re.finditer(
+        r"(?:https?://[^\"'\s>]+)?/wiki/(Infobox:[^\"?]+)\?action=formedit",
+        html,
+    ):
+        full = _normalise_page_slug(m.group(1))
+        if full.startswith("Infobox:"):
+            push(full)
+            push(full.split(":", 1)[1])
+
+    m = re.search(r"/wiki/Special:RunQuery/Image_query\?([^\"]+)\"", html)
+    if m:
+        qstr = "?" + unquote(m.group(1))
+        for key, vals in parse_qs(urlparse(qstr).query).items():
+            if not key.startswith("Image_query[") or not vals:
+                continue
+            name = vals[0].strip()
+            if name:
+                push(name.replace(" ", "_"))
+
+    if not ordered:
+        m = re.search(r"<p>\s*<b>([^<]{1,200})</b>", html, re.IGNORECASE)
+        if m:
+            inner = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+            push(inner)
+
+    return ordered
+
+
+def _extract_page_name_from_html(html: str) -> str | None:
+    """Best primary page slug for display / per-article URL; None if unknown."""
+    slugs = extract_page_name_slugs_for_mapping(html)
+    return slugs[0] if slugs else None
 
 
 def _extract_title_from_html(html: str) -> str | None:
@@ -311,7 +377,11 @@ def build_page_name_to_article_id(
     html_dir: Path,
     domain: str,
 ) -> dict[str, int]:
-    """Build mapping page_name -> article_id from HTML files."""
+    """Build mapping MediaWiki title slug -> article_id from HTML files.
+
+    One article may contribute several aliases (e.g. ``Infobox:Foo`` and ``Foo``)
+    so internal ``/wiki/Foo`` links resolve correctly.
+    """
     mapping: dict[str, int] = {}
     for p in sorted(html_dir.glob("*.html")):
         stem = p.stem
@@ -324,9 +394,16 @@ def build_page_name_to_article_id(
         except Exception as e:
             logger.warning("Could not read %s: %s", p, e)
             continue
-        page_name = _extract_page_name_from_html(html)
-        if page_name:
-            mapping[page_name] = aid
+        for slug in extract_page_name_slugs_for_mapping(html):
+            if slug not in mapping:
+                mapping[slug] = aid
+            elif mapping[slug] != aid:
+                logger.debug(
+                    "page slug collision %r -> %s vs %s (keeping first)",
+                    slug,
+                    mapping[slug],
+                    aid,
+                )
     return mapping
 
 

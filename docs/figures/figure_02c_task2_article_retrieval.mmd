@@ -1,0 +1,12 @@
+%% Panel C — Task 2: Article retrieval
+%% Render: npx @mermaid-js/mermaid-cli -i figure_02c_task2_article_retrieval.mmd -o figure_02c_task2_article_retrieval.pdf
+
+flowchart TB
+  CORP["Article-level corpus view"] --> IDX["Sparse + dense indexes\n(+ corpus representation ablations)"]
+  GOLD["Gold anchors from processed data\n+ Task-1-aligned test filtering"] --> QV["Query text variants\n(context × preprocessing)"]
+  QV --> RET["Retriever: BM25 / TF-IDF / dense"]
+  IDX --> RET
+  RET --> CE["Cross-encoder rerank\ntop-K_input → top-1 score"]
+  CE --> OUT["Versioned JSONL caches\n+ Recall@k / MRR logs"]
+  CE -.-> TRAIN["Optional: mine triples +\nfine-tune cross-encoder"]
+  TRAIN -.-> OUT

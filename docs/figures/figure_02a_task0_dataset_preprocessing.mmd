@@ -1,0 +1,16 @@
+%% Panel A — Task 0: Dataset preprocessing
+%% Render: npx @mermaid-js/mermaid-cli -i figure_02a_task0_dataset_preprocessing.mmd -o figure_02a_task0_dataset_preprocessing.pdf
+
+flowchart LR
+  subgraph Fandom["Fandom path"]
+    A1["API crawl / HTML dump"] --> A2["HTML → plain text units"]
+    A2 --> A3["Resolve /wiki/ targets,\nfilter non-internal"]
+    A3 --> A4["Emit JSONL:\nanchors, char spans,\ngold article_id"]
+  end
+  subgraph Wiki["Wikipedia path"]
+    B1["XML page stream"] --> B2["Wikitext → plain text +\nWikilink spans"]
+    B2 --> B3["Same schema as Fandom\n(no downstream code change)"]
+  end
+  A4 --> OUT["data/processed/domain/\n+ optional flat CSV"]
+  B3 --> OUT
+  OUT --> STATS["data/stats/domain.json"]
